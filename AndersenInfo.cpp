@@ -38,15 +38,9 @@ bool Andersen::runOnModule(const Module &M) {
   return false;
 }
 
-void Andersen::printPointsToSet(const llvm::Value *value, unsigned int contextId) {
-    if (contextId == GenericContextID) {
-        for (const Context *ctx : nodeFactory.getAssociatedContexts(value))
-            printPointsToSet(value, ctx->id);
-        return;
-    }
-
+void Andersen::printPointsToSet(const llvm::Value *value) {
     PtsSetType ptsSet;
-    getPointsToSet(value, ptsSet, contextId);
+    getPointsToSet(value, ptsSet);
 
     if (SilenceEmptyPtsSetInfo && ptsSet.empty()) return;
 
@@ -57,8 +51,6 @@ void Andersen::printPointsToSet(const llvm::Value *value, unsigned int contextId
         errs() << " [F] " << value->getName() << "\n";
     else
         errs() << *value << "\n";
-
-    errs() << "    Context: " << contextId << "\n";
 
     errs() << "    Set:\n";
     if (ptsSet.empty()) {

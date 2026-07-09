@@ -38,32 +38,31 @@ struct DenseMapInfo<FieldType> {
 class NodeMap {
 public:
     using NodeIndex = unsigned int;
-    using NodeMapType = llvm::DenseMap<
-        std::tuple<const Context*, const llvm::Value*, FieldType>, NodeIndex>;
+    using NodeMapType = llvm::DenseMap<std::tuple<const llvm::Value*, FieldType>, NodeIndex>;
 
-    NodeIndex insert(const Context *ctx, const llvm::Value *val, FieldType fields) {
+    NodeIndex insert(const llvm::Value *val, FieldType fields) {
         unsigned int nodeIndex = size();
 
-        fields = fields.empty() ? getFields(ctx, val) : fields;
+        fields = fields.empty() ? getFields(val) : fields;
 
-        _map[{ctx, val, fields}] = nodeIndex;
+        _map[{val, fields}] = nodeIndex;
         return nodeIndex;
     }
 
-    NodeIndex get(const Context *ctx, const llvm::Value *val) const {
-        return _map.lookup({ctx, val, getFields(ctx, val)});
+    NodeIndex get(const llvm::Value *val) const {
+        return _map.lookup({val, getFields(val)});
     }
 
     /*
      * Returns a vector of fields that are tracked by the NodeMap.
     */
-    std::vector<FieldType> lookupFields(const Context *ctx, const llvm::Value *val) const {
+    std::vector<FieldType> lookupFields(const llvm::Value *val) const {
         auto matches = _map | std::views::filter([&](const auto &x) {
-            return std::get<0>(x.first) == ctx && std::get<1>(x.first) == val;
+            return std::get<0>(x.first) == val;
         });
         std::vector<FieldType> fields;
         for (const auto &x : matches) {
-            fields.push_back(std::get<2>(x.first));
+            fields.push_back(std::get<1>(x.first));
         }
         return fields;
     }
@@ -71,35 +70,34 @@ public:
     /*
      * Returns the associated nodeIdx or InvalidIndex.
     */
-    NodeIndex find(const Context *ctx, const llvm::Value *val, FieldType fields) const {
+    NodeIndex find(const llvm::Value *val, FieldType fields) const {
         if (fields.empty())
-            fields = getFields(ctx, val);
-        auto itr = _map.find({ctx, val, fields});
+            fields = getFields(val);
+        auto itr = _map.find({val, fields});
         if (itr == _map.end())
             return InvalidIndex;
         return itr->getSecond();
     }
 
-    bool contains(const Context *ctx, const llvm::Value *val, FieldType fields) const {
-        fields = fields.empty() ? getFields(ctx, val) : fields;
-        return _map.contains({ctx, val, fields});
+    bool contains(const llvm::Value *val, FieldType fields) const {
+        fields = fields.empty() ? getFields(val) : fields;
+        return _map.contains({val, fields});
     }
 
-    NodeIndex& operator[](std::pair<const Context*, const llvm::Value *> value) {
-        return _map[{value.first, value.second, getFields(value.first, value.second)}];
+    NodeIndex& operator[](const llvm::Value * value) {
+        return _map[{value, getFields(value)}];
     }
 
-    NodeIndex& operator[](std::tuple<const Context*, const llvm::Value *, FieldType> value) {
-        const Context *ctx = std::get<0>(value);
-        const llvm::Value *val = std::get<1>(value);
-        FieldType fields = std::get<2>(value);
+    NodeIndex& operator[](std::tuple<const llvm::Value *, FieldType> value) {
+        const llvm::Value *val = std::get<0>(value);
+        FieldType fields = std::get<1>(value);
 
-        fields = fields.empty() ? getFields(ctx, val) : fields;
-        return _map[{ctx, val, fields}];
+        fields = fields.empty() ? getFields(val) : fields;
+        return _map[{val, fields}];
     }
 
-    void erase(const Context *ctx, const llvm::Value *val) {
-        _map.erase({ctx, val, getFields(ctx, val)});
+    void erase(const llvm::Value *val) {
+        _map.erase({val, getFields(val)});
     }
 
     const unsigned int size() const { return _map.size(); }
@@ -107,27 +105,6 @@ public:
     NodeMapType::const_iterator end() const { return _map.end(); }
 
 public:
-    std::vector<const Context*> getAssociatedContexts(NodeIndex index) const {
-        std::vector<const Context*> contexts;
-        for (const auto &[k, v] : _map) {
-            const Context *candidate = std::get<0>(k);
-            if (v == index && std::find(contexts.begin(), contexts.end(), candidate) == contexts.end())
-                contexts.push_back(std::get<0>(k));
-        }
-        return contexts;
-    }
-
-    std::vector<const Context*> getAssociatedContexts(const llvm::Value *v) const {
-        std::vector<const Context*> contexts;
-        for (const auto &[k, _] : _map) {
-            const Context *candidate = std::get<0>(k);
-            if (std::get<1>(k) == v &&\
-                std::find(contexts.begin(), contexts.end(), candidate) == contexts.end())
-                contexts.push_back(std::get<0>(k));
-        }
-        return contexts;
-    }
-
     void setDataLayout(const DataLayout *layout) {
         assert(_layout == nullptr);
         _layout = const_cast<DataLayout*>(layout);
@@ -136,7 +113,7 @@ public:
     /*
      * Attempts to resolve the indices that this value uses.
     */
-    FieldType getFields(const Context *ctx, const llvm::Value *value) const {
+    FieldType getFields(const llvm::Value *value) const {
         if (!value) return {};
 
         FieldType fields;
@@ -158,7 +135,7 @@ public:
 
         // Const Expression:
         else if (const ConstantExpr *cExpr = dyn_cast<ConstantExpr>(value))
-            return getFields(ctx, cExpr->getAsInstruction());
+            return getFields(cExpr->getAsInstruction());
 
         // GEP:
         else if (const GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(value)) {
@@ -169,7 +146,7 @@ public:
             if (const ConstantInt *offsetInt = dyn_cast<ConstantInt>(offset)) {
                 if (offsetInt->getZExtValue() > 0) {
                     // Theoretically, we should be able to resolve getFields() on the source.
-                    auto indices = getFields(ctx, gep->getOperand(0));
+                    auto indices = getFields(gep->getOperand(0));
                     fields.append(indices.begin(), indices.end());
 
                     // When the pointer offset is > 0, we need to at least make an attempt
@@ -214,16 +191,15 @@ public:
             // TODO: DWARF metadata will send me in circles, but that is what should be checked next.
 
             // The last actual thing I can think of to try is walking the users to find a GEP:
-            const llvm::Value *candidate = findAggregateFromParam(ctx, ctx, param);
-            return getFields(ctx, candidate);
+            const llvm::Value *candidate = findAggregateFromParam(param);
+            return getFields(candidate);
         }
 
         return fields;
     }
 
 private:
-    const llvm::Value* findAggregateFromParam(const Context* startCtx, 
-        const Context* ctx, const llvm::Value *param) const;
+    const llvm::Value* findAggregateFromParam(const llvm::Value *param) const;
 
     bool isAggregateGEP(const llvm::Value *value) const {
         if (const GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(value))

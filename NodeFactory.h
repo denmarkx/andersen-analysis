@@ -16,45 +16,6 @@ using namespace llvm;
 #include <vector>
 #include <utility>
 
-struct Context {
-  unsigned int id;
-  Context* prevCtx;
-  Context* nextCtx;
-  const llvm::CallBase* callSite;
-  const llvm::Function* func = nullptr;
-  llvm::DenseMap<std::pair<const llvm::CallBase*, const Function*>, Context*> children;
-
-  Context(unsigned int _id, Context* _prevCtx, const llvm::CallBase* _callSite, const llvm::Function *f) {
-    id = _id;
-    prevCtx = _prevCtx;
-    callSite = _callSite;
-    func = f;
-
-    if (prevCtx)
-      prevCtx->children[{_callSite, f}] = this;
-  }
-
-  Context* getChild(const llvm::CallBase *cs, const Function *f) const {
-    auto it = children.find({cs, f});
-    return it != children.end() ? it->second : nullptr;
-  }
-
-  std::string str() {
-    return "Context[" + std::to_string(id) + "]";
-  }
-
-  void printChain(size_t indent=0) const {
-    if (!callSite) return;
-    for (unsigned int i=0; i < indent; i++)
-      errs() << " ";
-    if (func)
-      errs() << "[Handling Callsite for: " << func->getName() << "\n";
-    errs() << *callSite << "\n";
-    if (prevCtx)
-      prevCtx->printChain(indent + 4);
-  }
-};
-
 // AndersNode class - This class is used to represent a node in the constraint
 // graph.  Due to various optimizations, it is not always the case that there is
 // always a mapping from a Node to a Value. (In particular, we add artificial
@@ -68,16 +29,15 @@ public:
   enum AndersNodeType { VALUE_NODE, OBJ_NODE };
 
 private:
-  unsigned int contextId;
   AndersNodeType type;
   NodeIndex idx, mergeTarget;
   const llvm::Value *value;
   llvm::SmallVector<unsigned int, 4> _fields;
 
 public:
-  AndersNode(AndersNodeType t, unsigned ctxId, unsigned i,
+  AndersNode(AndersNodeType t, unsigned i,
     const llvm::Value *v = nullptr, llvm::SmallVector<unsigned int, 4> fields={})
-      : type(t), contextId(ctxId), idx(i), mergeTarget(i), value(v), _fields(fields) {}
+      : type(t), idx(i), mergeTarget(i), value(v), _fields(fields) {}
 
   NodeIndex getIndex() const { return idx; }
   const llvm::Value *getValue() const { return value; }
@@ -112,7 +72,6 @@ class AndersNodeFactory {
 public:
   // The largest unsigned int is reserved for invalid index
   static const unsigned InvalidIndex;
-  static const unsigned GlobalContextID;
 
 private:
   // The set of nodes
@@ -136,7 +95,7 @@ private:
 
   // returnMap - This map contains an entry for each function in the program
   // that returns a ptr.
-  llvm::DenseMap<std::pair<const Context*, const llvm::Function *>, NodeIndex> returnMap;
+  llvm::DenseMap<const llvm::Function *, NodeIndex> returnMap;
 
   // varargMap - This map contains the entry used to represent all pointers
   // passed through the varargs portion of a function call for a particular
@@ -144,13 +103,8 @@ private:
   // take variable arguments.
   llvm::DenseMap<const llvm::Function *, NodeIndex> varargMap;
 
-  DenseMap<std::pair<NodeIndex,FieldType>, NodeIndex> fieldObjectMap;
+  DenseMap<std::pair<NodeIndex, FieldType>, NodeIndex> fieldObjectMap;
   DenseMap<NodeIndex, NodeIndex> fieldObjectBaseMap;
-
-  std::vector<const Context*> _contexts;
-  std::unordered_map<const llvm::CallBase*, std::vector<Context*>> _callSiteContexts;
-
-  unsigned int _ctxCounter = 0;
 
 public:
   AndersNodeFactory();
@@ -158,25 +112,25 @@ public:
   Context* _globalCtx;
 
   // Factory methods
-  NodeIndex createValueNode(const Context *context = nullptr, const llvm::Value *val = nullptr, FieldType fields={});
-  NodeIndex createObjectNode(const Context *context = nullptr, const llvm::Value *val = nullptr, FieldType fields={});
-  NodeIndex createReturnNode(const Context *context, const llvm::Function *f);
+  NodeIndex createValueNode(const llvm::Value *val = nullptr, FieldType fields={});
+  NodeIndex createObjectNode(const llvm::Value *val = nullptr, FieldType fields={});
+  NodeIndex createReturnNode(const llvm::Function *f);
   NodeIndex createVarargNode(const llvm::Function *f);
 
   // Map lookup interfaces (return InvalidIndex if value not found)
-  NodeIndex getValueNodeFor(const Context *context, const llvm::Value *val, FieldType fields={});
-  NodeIndex getValueNodeForConstant(const Context *context, const llvm::Constant *c, FieldType fields={});
-  NodeIndex getObjectNodeFor(const Context *context, const llvm::Value *val, FieldType fields={}) const;
-  NodeIndex getObjectNodeForConstant(const Context *context, const llvm::Constant *c, FieldType fields={}) const;
-  NodeIndex getReturnNodeFor(const Context *context, const llvm::Function *f) const;
+  NodeIndex getValueNodeFor(const llvm::Value *val, FieldType fields={});
+  NodeIndex getValueNodeForConstant(const llvm::Constant *c, FieldType fields={});
+  NodeIndex getObjectNodeFor(const llvm::Value *val, FieldType fields={}) const;
+  NodeIndex getObjectNodeForConstant(const llvm::Constant *c, FieldType fields={}) const;
+  NodeIndex getReturnNodeFor(const llvm::Function *f) const;
   NodeIndex getVarargNodeFor(const llvm::Function *f) const;
   NodeIndex getOrCreateFieldObject(NodeIndex baseObj, const FieldType& fields);
   NodeIndex getFieldBaseObject(NodeIndex fieldObj) const;
 
   // [deprecated] - use lookupFields
-  llvm::SmallVector<unsigned int, 4> getFields(const Context *ctx, const llvm::Value *v) const;
+  llvm::SmallVector<unsigned int, 4> getFields(const llvm::Value *v) const;
 
-  std::vector<FieldType> lookupFields(AndersNode::AndersNodeType type, const Context *ctx, const llvm::Value *v) const;
+  std::vector<FieldType> lookupFields(AndersNode::AndersNodeType type, const llvm::Value *v) const;
 
   // Node merge interfaces
   void mergeNode(NodeIndex n0, NodeIndex n1); // Merge n1 into n0
@@ -202,36 +156,18 @@ public:
   const llvm::Value *getValueForNode(NodeIndex i) const {
     return nodes.at(i).getValue();
   }
-  void getAllocSites(std::vector<std::pair<const Context*, const llvm::Value *>> &) const;
+  void getAllocSites(std::vector<const llvm::Value *> &) const;
 
   // Value remover
-  void removeNodeForValue(const Context *context, const llvm::Value *val) { 
-    valueNodeMap.erase(context, val); 
+  void removeNodeForValue(const llvm::Value *val) { 
+    valueNodeMap.erase(val); 
   }
 
   // Size getters
   unsigned getNumNodes() const { return nodes.size(); }
 
-  // Context management:
-  Context* createContext(Context* _prevCtx, const llvm::CallBase* callSite);
-  Context* createContext(Context* _prevCtx, const llvm::CallBase* callSite, const llvm::Function *f);
-  Context* createContext();
-
-  void registerCallSiteContext(const llvm::CallBase* cs, Context* ctx);
-  std::vector<Context*> getContextsForCallSite(const llvm::CallBase* cs);
-
-  const Context* getGlobalCtx() const;
-  const Context* getContext(unsigned int id) const;
-  const Context* getContextByID(unsigned int ctxId) const;
-  const Context* getContext(const llvm::Value *v) const;
-  unsigned int getNumContexts();
-
-  std::vector<const Context*> getAssociatedContexts(NodeIndex n) const;
-  std::vector<const Context*> getAssociatedContexts(const Value* val) const;
-
   void setDataLayout(const DataLayout *layout);
   const DataLayout* getDataLayout() const;
-
   const DataLayout *_layout = nullptr;
 
   // For debugging purpose
