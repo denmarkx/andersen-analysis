@@ -35,3 +35,17 @@ target_link_libraries(Andersen PUBLIC ${LLVM_LIBS} ${GRAPHVIZ_LIBRARIES})
 add_executable(main main.cxx)
 target_link_libraries(main Andersen m)
 target_include_directories(main PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+## =================================================================
+
+include(CTest)
+include("include/doctest.cmake")
+
+file(GLOB_RECURSE TEST_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/tests/*.cxx")
+
+add_executable(unit_test ${TEST_FILES})
+target_include_directories(unit_test PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(unit_test Andersen)
+doctest_discover_tests(unit_test)
+
+## =================================================================
