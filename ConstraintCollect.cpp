@@ -84,14 +84,6 @@ void Andersen::scanFunction(const llvm::Function *f) {
         nodeFactory.createValueNode(inst);
     else if (isa<InsertValueInst>(inst) && typeContainsPointer(inst->getType()))
       nodeFactory.createValueNode(inst);
-    // If this is a call, we scan that function:
-    if (const CallBase *cs = dyn_cast<CallBase>(inst)) {
-      // I will note that this absolutely tears into the points to set at the end
-      // if not guarded..but this is an underlying issue and requires a refactor.
-      if (cs->isInlineAsm()) continue;
-      setupFunctionConstraints(cs->getCalledFunction());
-      scanFunction(cs->getCalledFunction());
-      }
     }
   
   // Now, collect constraint for each relevant instruction
@@ -236,6 +228,7 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
   case Instruction::Invoke: {
     const CallBase *cb = dyn_cast<CallBase>(inst);
     assert(cb && "Something wrong with callsite?");
+    addConstraintForCall(cb);
     break;
   }
   case Instruction::Ret: {
