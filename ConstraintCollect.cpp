@@ -1,0 +1,686 @@
+#include "Andersen.h"
+#include "Constraint.h"
+#include "NodeFactory.h"
+
+#include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/PatternMatch.h"
+#include <queue>
+
+using namespace llvm;
+
+// CollectConstraints - This stage scans the program, adding a constraint to the
+// Constraints list for each instruction in the program that induces a
+// constraint, and setting up the initial points-to graph.
+
+void Andersen::collectConstraints(const Module &M) {
+  // First, the universal ptr points to universal obj, and the universal obj
+  // points to itself
+  constraints.emplace_back(AndersConstraint::ADDR_OF,
+                           nodeFactory.getUniversalPtrNode(),
+                           nodeFactory.getUniversalObjNode());
+
+  // Next, the null pointer points to the null object.
+  constraints.emplace_back(AndersConstraint::ADDR_OF,
+                           nodeFactory.getNullPtrNode(),
+                           nodeFactory.getNullObjectNode());
+
+  // Next, add any constraints on global variables. Associate the address of the
+  // global object as pointing to the memory for the global: &G = <G memory>
+  Context *globalCtx = collectConstraintsForGlobals(M);
+
+  // Here is a notable point before we proceed:
+  // For functions with non-local linkage type, theoretically we should not
+  // trust anything that get passed to it or get returned by it. However,
+  // precision will be seriously hurt if we do that because if we do not run a
+  // -internalize pass before the -anders pass, almost every function is marked
+  // external. We'll just assume that even external linkage will not ruin the
+  // analysis result first
+
+  for (auto const &f : M) {
+    if (f.isDeclaration() || f.isIntrinsic()) continue;
+    bool hasInternalCaller = false;
+    for (const Use &use : f.uses()) {
+      if (const auto *cb = dyn_cast<CallBase>(use.getUser())) {
+        if (cb->getCalledFunction() == &f && !cb->getFunction()->isDeclaration()) {
+          hasInternalCaller = true;
+          break;
+        }
+      }
+    }
+    if (!hasInternalCaller)
+      scanFunction(globalCtx, &f);
+  }
+
+}
+
+static bool typeContainsPointer(const Type *t) {
+    if (t->isPointerTy()) return true;
+    if (t->isArrayTy()) return typeContainsPointer(t->getArrayElementType());
+    if (t->isStructTy()) {
+        for (unsigned i = 0; i < t->getStructNumElements(); ++i)
+            if (typeContainsPointer(t->getStructElementType(i))) return true;
+    }
+    return false;
+}
+
+static bool isFunctionInContextChain(const Context *ctx, const llvm::Function *f) {
+    const Context *cur = ctx;
+    while (cur != nullptr) {
+      if (cur->func == f) return true;
+      cur = cur->prevCtx;
+    }
+    return false;
+}
+
+void Andersen::scanFunction(Context *context, const llvm::Function *f) {
+  if (!_scannedFunctions.insert({context, f}).second)
+    return;
+
+  // First, create a value node for each instruction with pointer type. It is
+  // necessary to do the job here rather than on-the-fly because an
+  // instruction may refer to the value node defined before it (e.g. phi
+  // nodes)
+  bool recursiveHack = false;
+  for (const_inst_iterator itr = inst_begin(f), ite = inst_end(f); itr != ite;
+       ++itr) {
+    auto inst = &*itr.getInstructionIterator();
+    if (inst->getType()->isPointerTy()) {
+        nodeFactory.createValueNode(context, inst);
+    }
+    // i want to say this can be simplified somehow
+    else if (isa<CallBase>(inst) && typeContainsPointer(inst->getType()))
+        nodeFactory.createValueNode(context, inst);
+    else if (isa<InsertValueInst>(inst) && typeContainsPointer(inst->getType()))
+      nodeFactory.createValueNode(context, inst);
+    // If this is a call, we scan that function:
+    if (const CallBase *cs = dyn_cast<CallBase>(inst)) {
+      // I will note that this absolutely tears into the points to set at the end
+      // if not guarded..but this is an underlying issue and requires a refactor.
+      if (cs->isInlineAsm()) continue;
+      // TODO: recursive funcs
+      if (isFunctionInContextChain(context, cs->getCalledFunction())) {
+        recursiveHack = true;
+      } else {
+        Context *child = nodeFactory.createContext(context, cs);
+        setupFunctionConstraints(child, cs->getCalledFunction());
+        scanFunction(child, cs->getCalledFunction());
+      }
+    }
+  }
+  
+  // Now, collect constraint for each relevant instruction
+  for (const_inst_iterator itr = inst_begin(f), ite = inst_end(f); itr != ite;
+       ++itr) {
+    auto inst = &*itr.getInstructionIterator();
+    collectConstraintsForInstruction(context, inst, recursiveHack);
+  }
+}
+
+Context* Andersen::collectConstraintsForGlobals(const Module &M) {
+  _globalCtx = nodeFactory.createContext();
+  nodeFactory._globalCtx = _globalCtx;
+  // Create a pointer and an object for each global variable
+  for (auto const &globalVal : M.globals()) {
+    NodeIndex gVal = nodeFactory.createValueNode(_globalCtx, &globalVal);
+    NodeIndex gObj = nodeFactory.createObjectNode(_globalCtx, &globalVal);
+    constraints.emplace_back(AndersConstraint::ADDR_OF, gVal, gObj);
+  }
+
+  // Aliases are considered their own thing I suppose.
+  for (auto const &alias : M.aliases()) {
+    NodeIndex aVal = nodeFactory.createValueNode(_globalCtx, &alias);
+    NodeIndex aObj = nodeFactory.createObjectNode(_globalCtx, &alias);
+    constraints.emplace_back(AndersConstraint::ADDR_OF, aVal, aObj);
+  }
+
+  // Functions and function pointers are also considered global
+  for (auto const &f : M) {
+    setupFunctionConstraints(_globalCtx, &f);
+  }
+
+  // Init globals here since an initializer may refer to a global var/func below it
+  for (auto const &globalVal : M.globals()) {
+    NodeIndex gObj = nodeFactory.getObjectNodeFor(_globalCtx, &globalVal);
+    assert(gObj != AndersNodeFactory::InvalidIndex &&
+           "Cannot find global object!");
+
+    if (globalVal.hasDefinitiveInitializer()) {
+      addGlobalInitializerConstraints(gObj, globalVal.getInitializer());
+    } else {
+      // If it doesn't have an initializer (i.e. it's defined in another
+      // translation unit), it points to the universal set.
+      NodeIndex fObj = nodeFactory.createObjectNode(_globalCtx);
+      constraints.emplace_back(AndersConstraint::ADDR_OF, gObj, fObj);
+    }
+  }
+  return _globalCtx;
+}
+
+void Andersen::setupFunctionConstraints(const Context *context, const Function *f) {
+  if (!_setupFunctions.insert({context, f}).second)
+    return;
+  // If f is an addr-taken function, create a pointer and an object for it
+  if (f->hasAddressTaken()) {
+    // 创建一个值节点和一个对象节点
+    NodeIndex fVal = nodeFactory.createValueNode(context, f);
+    NodeIndex fObj = nodeFactory.createObjectNode(context, f);
+    constraints.emplace_back(AndersConstraint::ADDR_OF, fVal, fObj);
+  }
+
+  if (f->isDeclaration() || f->isIntrinsic()) return;
+
+  // Create return node
+  const Type *retTy = f->getFunctionType()->getReturnType();
+  if (retTy->isPointerTy() || typeContainsPointer(retTy)) {
+      nodeFactory.createReturnNode(context, f);
+  }
+
+  // Create vararg node
+  if (f->getFunctionType()->isVarArg())
+    nodeFactory.createVarargNode(f);
+
+  // Add nodes for all formal arguments.
+  for (Function::const_arg_iterator itr = f->arg_begin(), ite = f->arg_end();
+       itr != ite; ++itr) {
+    if (isa<PointerType>(itr->getType()))
+      nodeFactory.createValueNode(context, &*itr);
+  }
+}
+
+void Andersen::addGlobalInitializerConstraints(NodeIndex objNode,
+                                               const Constant *c) {
+  // errs() << "Called with node# = " << objNode << ", initializer = " << *c <<
+  // "\n";
+  if (c->getType()->isSingleValueType()) {
+    if (isa<PointerType>(c->getType())) {
+      NodeIndex rhsNode = nodeFactory.getObjectNodeForConstant(_globalCtx, c);
+      assert(rhsNode != AndersNodeFactory::InvalidIndex &&
+             "rhs node not found");
+      if (rhsNode == nodeFactory.getUniversalObjNode() ||
+          rhsNode == AndersNodeFactory::InvalidIndex) {
+          rhsNode = nodeFactory.createObjectNode(_globalCtx);
+      }
+      constraints.emplace_back(AndersConstraint::ADDR_OF, objNode, rhsNode);
+    }
+  } else if (c->isNullValue()) {
+    constraints.emplace_back(AndersConstraint::COPY, objNode,
+                             nodeFactory.getNullObjectNode());
+  } else if (!isa<UndefValue>(c)) {
+    // Since we are doing field-insensitive analysis, all objects in the
+    // array/struct are pointed-to by the 1st-field pointer
+    assert(isa<ConstantArray>(c) || isa<ConstantDataSequential>(c) ||
+           isa<ConstantStruct>(c));
+
+    FieldType fields;
+    addGlobalAggregateConstraints(nodeFactory.getValueForNode(objNode), c, fields);
+
+  }
+}
+
+void Andersen::addGlobalAggregateConstraints(const llvm::Value *aggregate, const llvm::Constant *c, FieldType &fields) {
+  for (unsigned int i=0; i < c->getNumOperands(); i++) {
+    Constant *element = cast<Constant>(c->getOperand(i));
+    FieldType newFields;
+    newFields.append(fields);
+    newFields.push_back(i);
+
+    if (element->getType()->isAggregateType()) {
+      addGlobalAggregateConstraints(aggregate, element, newFields);
+      continue;
+    }
+
+    NodeIndex valIdx = nodeFactory.getValueNodeFor(_globalCtx, aggregate, newFields);
+    NodeIndex objIdx = nodeFactory.getObjectNodeFor(_globalCtx, aggregate, newFields);
+    if (objIdx == AndersNodeFactory::InvalidIndex) {
+      valIdx = nodeFactory.createValueNode(_globalCtx, aggregate, newFields);
+      objIdx = nodeFactory.createObjectNode(_globalCtx, aggregate, newFields);
+      constraints.emplace_back(AndersConstraint::ADDR_OF, valIdx, objIdx);
+    }
+
+    addGlobalInitializerConstraints(objIdx, element);
+  }
+}
+
+void Andersen::collectConstraintsForInstruction(const Context *context, const Instruction *inst, bool recursiveHack) {
+  switch (inst->getOpcode()) {
+  case Instruction::Alloca: {
+    NodeIndex valNode = nodeFactory.getValueNodeFor(context, inst);
+    assert(valNode != AndersNodeFactory::InvalidIndex &&
+           "Failed to find alloca value node");
+    NodeIndex objNode = nodeFactory.createObjectNode(context, inst);
+    constraints.emplace_back(AndersConstraint::ADDR_OF, valNode, objNode);
+    break;
+  }
+  case Instruction::Call:
+  case Instruction::Invoke: {
+    const CallBase *cb = dyn_cast<CallBase>(inst);
+    assert(cb && "Something wrong with callsite?");
+
+    // TODO: recursive funcs
+    if (!recursiveHack)
+      addConstraintForCall(context, cb);
+
+    break;
+  }
+  case Instruction::Ret: {
+      if (inst->getNumOperands() == 0) break;
+      const Type *retTy = inst->getOperand(0)->getType();
+      if (!retTy->isPointerTy() && !typeContainsPointer(retTy)) break;
+
+      NodeIndex retIndex = nodeFactory.getReturnNodeFor(
+          context, inst->getParent()->getParent());
+      if (retIndex == AndersNodeFactory::InvalidIndex) break;
+
+      NodeIndex valIndex = nodeFactory.getValueNodeFor(context, inst->getOperand(0));
+      if (valIndex == AndersNodeFactory::InvalidIndex) break;
+
+      constraints.emplace_back(AndersConstraint::COPY, retIndex, valIndex);
+      break;
+  }
+  case Instruction::Load: {
+    if (inst->getType()->isPointerTy()) {
+      NodeIndex opIndex = nodeFactory.getValueNodeFor(context, inst->getOperand(0));
+      assert(opIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find load operand node");
+      NodeIndex valIndex = nodeFactory.getValueNodeFor(context, inst);
+      assert(valIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find load value node");
+      if (const auto *gep = dyn_cast<GetElementPtrInst>(inst->getOperand(0))) {
+        FieldType fields = nodeFactory.getFields(context, gep);
+        if (!fields.empty()) {
+            NodeIndex gepSrcIndex = nodeFactory.getValueNodeFor(context, gep->getPointerOperand());
+            assert(gepSrcIndex != AndersNodeFactory::InvalidIndex);
+            NodeIndex tmpIndex = nodeFactory.createValueNode(context, nullptr);
+            constraints.emplace_back(AndersConstraint::GEP, tmpIndex, gepSrcIndex, fields);
+            constraints.emplace_back(AndersConstraint::LOAD, valIndex, tmpIndex);
+            break;
+        }
+      }
+
+      constraints.emplace_back(AndersConstraint::LOAD, valIndex, opIndex);
+    }
+    break;
+  }
+  case Instruction::Store: {
+    if (inst->getOperand(0)->getType()->isPointerTy()) {
+      NodeIndex srcIndex = nodeFactory.getValueNodeFor(context, inst->getOperand(0));
+      assert(srcIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find store src node");
+      NodeIndex dstIndex = nodeFactory.getValueNodeFor(context, inst->getOperand(1));
+      assert(dstIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find store dst node");
+
+      const llvm::Value *ptrOp = inst->getOperand(1);
+      if (const auto *gep = dyn_cast<GetElementPtrInst>(ptrOp)) {
+          FieldType fields = nodeFactory.getFields(context, gep);
+          if (!fields.empty()) {
+              NodeIndex gepSrcIndex = nodeFactory.getValueNodeFor(context, gep->getPointerOperand());
+              assert(gepSrcIndex != AndersNodeFactory::InvalidIndex);
+              NodeIndex tmpIndex = nodeFactory.createValueNode(context, nullptr);
+              constraints.emplace_back(AndersConstraint::GEP, tmpIndex, gepSrcIndex, fields);
+              constraints.emplace_back(AndersConstraint::STORE, tmpIndex, srcIndex);
+              break;
+          }
+      }
+
+      constraints.emplace_back(AndersConstraint::STORE, dstIndex, srcIndex);
+    }
+    break;
+  }
+  case Instruction::GetElementPtr: {
+    assert(inst->getType()->isPointerTy());
+
+    // P1 = getelementptr P2, ... --> <Copy/P1/P2>
+    const llvm::Value *src = inst->getOperand(0);
+    auto fields = nodeFactory.getFields(context, inst);
+
+    NodeIndex srcIndex = nodeFactory.getValueNodeFor(context, src);
+    NodeIndex dstIndex = nodeFactory.getValueNodeFor(context, inst);
+
+    // If our source is a GEP, we need to resolve the alloc site.
+    if (const GetElementPtrInst *sourceInst = dyn_cast<GetElementPtrInst>(src)) {
+      NodeIndex underlyingSrcIndex = AndersNodeFactory::InvalidIndex;
+
+      // We can assume that the source GEP has been resolved properly.
+      // ..meaning it already has a constraint to an object:
+      auto itr = std::find_if(constraints.begin(), constraints.end(), [&](const AndersConstraint& c) {
+        return (c.getType() == AndersConstraint::ADDR_OF || c.getType() == AndersConstraint::GEP) && c.getDest() == srcIndex;
+      });
+
+      // Best case scenario is itr isnt the end..otherwise, we have to try and find it:
+      if (itr != constraints.end() && itr->getType() != AndersConstraint::GEP)
+        underlyingSrcIndex = itr->getSrc();
+      else {
+        std::queue<NodeIndex> worklist;
+        worklist.push(itr->getSrc());
+
+        while (!worklist.empty()) {
+          NodeIndex current = worklist.front();
+          worklist.pop();
+          for (const AndersConstraint &c : constraints) {
+            if (c.getDest() == current) {
+              if (c.getType() == AndersConstraint::ADDR_OF) {
+                // In this case, the destination is acceptable. Otherwise we'll be getting the object.
+                underlyingSrcIndex = c.getDest();
+                break;
+              }
+              else if (c.getType() == AndersConstraint::GEP) {
+                worklist.push(c.getSrc());
+                break;
+              }
+            }
+          }
+        }
+        if (underlyingSrcIndex != AndersNodeFactory::InvalidIndex)
+          srcIndex = underlyingSrcIndex;
+      }
+    }
+    constraints.emplace_back(AndersConstraint::GEP, dstIndex, srcIndex, fields);
+
+    //   if (itr != constraints.end()) {
+    //     // However, we're more interested as the what the actual object is:
+    //     src = nodeFactory.getValueForNode(itr->getSrc());
+    //     assert(src != nullptr && "GEP Constraint failed: underlying src is null.");
+
+    //     // We can change our srcIndex, because it may exist already if we've been through this before.
+    //     srcIndex = nodeFactory.getObjectNodeFor(context, src, fields);
+    //   }
+    // }
+
+    // if (srcIndex == AndersNodeFactory::InvalidIndex) {
+    //   // We don't create objects for each field when we encounter an allocation
+    //   // ..meaning it's not an oddity if srcIndex is invalid.
+    //   srcIndex = nodeFactory.createObjectNode(context, src, fields);
+    // }
+
+    // assert(srcIndex != AndersNodeFactory::InvalidIndex &&
+    //        "Failed to find gep src node");
+    // NodeIndex dstIndex = nodeFactory.getValueNodeFor(context, inst, fields);
+    // assert(dstIndex != AndersNodeFactory::InvalidIndex &&
+    //        "Failed to find gep dst node");
+
+    // constraints.emplace_back(AndersConstraint::ADDR_OF, dstIndex, srcIndex);
+
+    break;
+  }
+  case Instruction::PHI: {
+    if (inst->getType()->isPointerTy()) {
+      const PHINode *phiInst = cast<PHINode>(inst);
+      NodeIndex dstIndex = nodeFactory.getValueNodeFor(context, phiInst);
+      assert(dstIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find phi dst node");
+      for (unsigned i = 0, e = phiInst->getNumIncomingValues(); i != e; ++i) {
+        NodeIndex srcIndex =
+            nodeFactory.getValueNodeFor(context, phiInst->getIncomingValue(i));
+        assert(srcIndex != AndersNodeFactory::InvalidIndex &&
+               "Failed to find phi src node");
+        constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex);
+      }
+    }
+    break;
+  }
+  case Instruction::BitCast: {
+    if (inst->getType()->isPointerTy()) {
+      NodeIndex srcIndex = nodeFactory.getValueNodeFor(context, inst->getOperand(0));
+      assert(srcIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find bitcast src node");
+      NodeIndex dstIndex = nodeFactory.getValueNodeFor(context, inst);
+      assert(dstIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find bitcast dst node");
+      constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex);
+    }
+    break;
+  }
+  case Instruction::IntToPtr: {
+    assert(inst->getType()->isPointerTy());
+
+    // Get the node index for dst
+    NodeIndex dstIndex = nodeFactory.getValueNodeFor(context, inst);
+    assert(dstIndex != AndersNodeFactory::InvalidIndex &&
+           "Failed to find inttoptr dst node");
+
+    // We use pattern matching to look for a matching ptrtoint
+    Value *op = inst->getOperand(0);
+
+    // Pointer copy: Y = inttoptr (ptrtoint X)
+    Value *srcValue = nullptr;
+    if (PatternMatch::match(
+            op, PatternMatch::m_PtrToInt(PatternMatch::m_Value(srcValue)))) {
+      NodeIndex srcIndex = nodeFactory.getValueNodeFor(context, srcValue);
+      assert(srcIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find inttoptr src node");
+      NodeIndex freshObj = nodeFactory.createObjectNode(context, nullptr);
+      NodeIndex freshPtr = nodeFactory.createValueNode(context, nullptr);
+      constraints.emplace_back(AndersConstraint::ADDR_OF, freshPtr, freshObj);
+      constraints.emplace_back(AndersConstraint::COPY, dstIndex, freshPtr);
+      break;
+    }
+
+    // Pointer arithmetic: Y = inttoptr (ptrtoint (X) + offset)
+    if (PatternMatch::match(
+            op, PatternMatch::m_Add(
+                    PatternMatch::m_PtrToInt(PatternMatch::m_Value(srcValue)),
+                    PatternMatch::m_Value()))) {
+      NodeIndex srcIndex = nodeFactory.getValueNodeFor(context, srcValue);
+      assert(srcIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find inttoptr src node");
+      constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex);
+      break;
+    }
+
+    // Otherwise, we really don't know what dst points to
+    constraints.emplace_back(AndersConstraint::COPY, dstIndex,
+                             nodeFactory.getUniversalPtrNode());
+
+    break;
+  }
+  case Instruction::Select: {
+    if (inst->getType()->isPointerTy()) {
+      NodeIndex srcIndex1 = nodeFactory.getValueNodeFor(context, inst->getOperand(1));
+      assert(srcIndex1 != AndersNodeFactory::InvalidIndex &&
+             "Failed to find select src node 1");
+      NodeIndex srcIndex2 = nodeFactory.getValueNodeFor(context, inst->getOperand(2));
+      assert(srcIndex2 != AndersNodeFactory::InvalidIndex &&
+             "Failed to find select src node 2");
+      NodeIndex dstIndex = nodeFactory.getValueNodeFor(context, inst);
+      assert(dstIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find select dst node");
+      constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex1);
+      constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex2);
+    }
+    break;
+  }
+  case Instruction::VAArg: {
+    if (inst->getType()->isPointerTy()) {
+      NodeIndex dstIndex = nodeFactory.getValueNodeFor(context, inst);
+      assert(dstIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find va_arg dst node");
+      NodeIndex vaIndex =
+          nodeFactory.getVarargNodeFor(inst->getParent()->getParent());
+      assert(vaIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find vararg node");
+      constraints.emplace_back(AndersConstraint::COPY, dstIndex, vaIndex);
+    }
+    break;
+  }
+  case Instruction::ExtractValue: {
+      if (!inst->getType()->isPointerTy()) break;
+      NodeIndex dstIndex = nodeFactory.getValueNodeFor(context, inst);
+      assert(dstIndex != AndersNodeFactory::InvalidIndex);
+
+      const ExtractValueInst *evi = cast<ExtractValueInst>(inst);
+      const Value *aggOp = evi->getAggregateOperand();
+
+      if (!isa<Constant>(aggOp)) {
+          NodeIndex srcIndex = nodeFactory.getValueNodeFor(context, aggOp);
+          if (srcIndex != AndersNodeFactory::InvalidIndex)
+              constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex);
+      }
+      break;
+  }
+  case Instruction::InsertValue: {
+      if (!typeContainsPointer(inst->getType())) break;
+      NodeIndex dstIndex = nodeFactory.getValueNodeFor(context, inst);
+      if (dstIndex == AndersNodeFactory::InvalidIndex) break;
+
+      const InsertValueInst *ivi = cast<InsertValueInst>(inst);
+      const Value *insertedVal = ivi->getInsertedValueOperand();
+      const Value *aggOp = ivi->getAggregateOperand();
+      if (insertedVal->getType()->isPointerTy() && !isa<Constant>(insertedVal)) {
+          NodeIndex srcIndex = nodeFactory.getValueNodeFor(context, insertedVal);
+          if (srcIndex != AndersNodeFactory::InvalidIndex)
+              constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex);
+      }
+      if (!isa<Constant>(aggOp) && typeContainsPointer(aggOp->getType())) {
+          NodeIndex aggIndex = nodeFactory.getValueNodeFor(context, aggOp);
+          if (aggIndex != AndersNodeFactory::InvalidIndex)
+              constraints.emplace_back(AndersConstraint::COPY, dstIndex, aggIndex);
+      }
+      break;
+  }
+  // We have no intention to support exception-handling in the near future
+  case Instruction::LandingPad:
+  case Instruction::Resume:
+  // Atomic instructions can be modeled by their non-atomic counterparts. To be
+  // supported
+  case Instruction::AtomicRMW:
+  case Instruction::AtomicCmpXchg: {
+    // errs() << *inst << "\n";
+    // llvm_unreachable("not implemented yet");
+  }
+  default: {
+    if (inst->getType()->isPointerTy()) {
+      // errs() << *inst << "\n";
+      // llvm_unreachable("pointer-related inst not handled!");
+    }
+    break;
+  }
+  }
+}
+
+// There are two types of constraints to add for a function call:
+// - ValueNode(callsite) = ReturnNode(call target)
+// - ValueNode(formal arg) = ValueNode(actual arg)
+void Andersen::addConstraintForCall(const Context *context, const CallBase* cs) {
+  // Ignore asm calls.
+  if (cs->isInlineAsm()) return;
+
+  if (const Function *f = cs->getCalledFunction()) // Direct call
+  {
+    if (f->isDeclaration() || f->isIntrinsic()) // External library call
+    {
+      // Handle libraries separately
+      if (addConstraintForExternalLibrary(context, cs, f))
+        return;
+      else // Unresolved library call: ruin everything!
+      {
+        // errs() << "Unresolved ext function: " << f->getName() << "\n";
+        if (cs->getFunctionType()->isPointerTy()) {
+          NodeIndex retIndex = nodeFactory.getValueNodeFor(context, cs);
+          assert(retIndex != AndersNodeFactory::InvalidIndex &&
+                 "Failed to find ret node!");
+          NodeIndex fObj = nodeFactory.createObjectNode(context, cs);
+          constraints.emplace_back(AndersConstraint::ADDR_OF, retIndex, fObj);
+        }
+        // for (CallBase::const_op_iterator itr = cs->arg_begin(),
+        //                                      ite = cs->arg_end();
+        //      itr != ite; ++itr) {
+        //   Value *argVal = *itr;
+        //   if (argVal->getType()->isPointerTy()) {
+        //     NodeIndex argIndex = nodeFactory.getValueNodeFor(argVal);
+        //     assert(argIndex != AndersNodeFactory::InvalidIndex &&
+        //            "Failed to find arg node!");
+        //     NodeIndex fObj = nodeFactory.createObjectNode(cs);
+        //     constraints.emplace_back(AndersConstraint::ADDR_OF, argIndex, fObj);
+        //   }
+        // }
+      }
+    } else // Non-external function call
+    {
+      Context* calleeCtx = context->getChild(cs, cs->getCalledFunction());
+      const Type *retTy = cs->getCalledFunction()->getReturnType();
+      if (retTy->isPointerTy() || typeContainsPointer(retTy)) {
+          NodeIndex retIndex = nodeFactory.getValueNodeFor(context, cs);
+          if (retIndex != AndersNodeFactory::InvalidIndex) {
+              NodeIndex fRetIndex = nodeFactory.getReturnNodeFor(calleeCtx, f);
+              if (fRetIndex != AndersNodeFactory::InvalidIndex)
+                  constraints.emplace_back(AndersConstraint::COPY, retIndex, fRetIndex);
+          }
+      }
+      // The argument constraints
+      addArgumentConstraintForCall(calleeCtx, context, cs, f);
+    }
+  } else {
+    // Indirect call are deferred until later.
+    deferredFuncPointers.emplace_back(context, cs);
+  }
+}
+
+void Andersen::addReturnConstraintForCall(const Context* calleeCtx,
+                                          const Context* context,
+                                          const CallBase *cs,
+                                          const Function *f) {
+  const Type *retTy = f->getReturnType();
+  if (retTy->isPointerTy() || typeContainsPointer(retTy)) {
+      NodeIndex retIndex = nodeFactory.getValueNodeFor(context, cs);
+      if (retIndex != AndersNodeFactory::InvalidIndex) {
+          NodeIndex fRetIndex = nodeFactory.getReturnNodeFor(calleeCtx, f);
+          if (fRetIndex != AndersNodeFactory::InvalidIndex)
+              constraints.emplace_back(AndersConstraint::COPY, retIndex, fRetIndex);
+      }
+  }
+}
+
+void Andersen::addArgumentConstraintForCall(const Context *calleeCtx,
+                                            const Context *context,
+                                            const CallBase *cs,
+                                            const Function *f) {
+  Function::const_arg_iterator fItr = f->arg_begin();
+  CallBase::User::const_op_iterator aItr = cs->arg_begin();
+  while (fItr != f->arg_end() && aItr != cs->arg_end()) {
+    const Argument *formal = &*fItr;
+    const Value *actual = *aItr;
+
+    if (formal->getType()->isPointerTy()) {
+      NodeIndex fIndex = nodeFactory.getValueNodeFor(calleeCtx, formal);
+      assert(fIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find formal arg node!");
+      if (actual->getType()->isPointerTy()) {
+        NodeIndex aIndex = nodeFactory.getValueNodeFor(context, actual);
+        assert(aIndex != AndersNodeFactory::InvalidIndex &&
+               "Failed to find actual arg node!");
+        constraints.emplace_back(AndersConstraint::COPY, fIndex, aIndex);
+      } else
+        constraints.emplace_back(AndersConstraint::COPY, fIndex,
+                                 nodeFactory.getUniversalPtrNode());
+    }
+
+    ++fItr, ++aItr;
+  }
+
+  // Copy all pointers passed through the varargs section to the varargs node
+  if (f->getFunctionType()->isVarArg()) {
+    while (aItr != cs->arg_end()) {
+      const Value *actual = *aItr;
+      if (actual->getType()->isPointerTy()) {
+        NodeIndex aIndex = nodeFactory.getValueNodeFor(context, actual);
+        assert(aIndex != AndersNodeFactory::InvalidIndex &&
+               "Failed to find actual arg node!");
+        NodeIndex vaIndex = nodeFactory.getVarargNodeFor(f);
+        assert(vaIndex != AndersNodeFactory::InvalidIndex &&
+               "Failed to find vararg node!");
+        constraints.emplace_back(AndersConstraint::COPY, vaIndex, aIndex);
+      }
+
+      ++aItr;
+    }
+  }
+}
+
+Context* Andersen::getGlobalCtx() const {
+  return _globalCtx;
+}

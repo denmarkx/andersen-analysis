@@ -1,0 +1,6 @@
+build/
+files/
+*.clangd
+*.json
+*.png
+*.ll
