@@ -90,11 +90,10 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "Call_Return") {
 
     const Value *ptrA = findInstruction("main", "ptr");
     const Value *retval = findInstruction("main", "retval");
-    assertPtsToSetSize(ptrA, 1);
-    // assertPtsToSetSize(load, 0);
 
-    // TODO: ptr %arg [v] pts to ptr [o]
-    // ...but retval [v] pts to nothing..
+    assertPtsToSetSize(ptrA, 1);
+    assertPtsToSetSize(retval, 1);
+    assertPtsToContains(retval, ptrA);
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "PHI") {

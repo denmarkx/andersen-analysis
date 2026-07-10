@@ -253,8 +253,8 @@ void AndersNodeFactory::dumpNodeInfo() const {
 
   errs() << "\nReturn Map:\n";
   for (auto const &mapping : returnMap)
-    // errs() << mapping.first.second->getName() << "  -->>  [Node #" << mapping.second
-           // << "]\n";
+    errs() << mapping.first->getName() << "  -->>  [Node #" << mapping.second
+           << "]\n";
   errs() << "\nVararg Map:\n";
   for (auto const &mapping : varargMap)
     errs() << mapping.first->getName() << "  -->>  [Node #" << mapping.second

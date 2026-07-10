@@ -41,21 +41,8 @@ void Andersen::collectConstraints(const Module &M) {
   // external. We'll just assume that even external linkage will not ruin the
   // analysis result first
 
-  for (auto const &f : M) {
-    if (f.isDeclaration() || f.isIntrinsic()) continue;
-    bool hasInternalCaller = false;
-    for (const Use &use : f.uses()) {
-      if (const auto *cb = dyn_cast<CallBase>(use.getUser())) {
-        if (cb->getCalledFunction() == &f && !cb->getFunction()->isDeclaration()) {
-          hasInternalCaller = true;
-          break;
-        }
-      }
-    }
-    if (!hasInternalCaller)
-      scanFunction(&f);
-  }
-
+  for (auto const &f : M)
+    scanFunction(&f);
 }
 
 static bool typeContainsPointer(const Type *t) {
