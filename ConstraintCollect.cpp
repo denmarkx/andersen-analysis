@@ -189,13 +189,9 @@ void Andersen::addGlobalAggregateConstraints(const llvm::Value *aggregate, const
       continue;
     }
 
-    NodeIndex valIdx = nodeFactory.getValueNodeFor(aggregate, newFields);
     NodeIndex objIdx = nodeFactory.getObjectNodeFor(aggregate, newFields);
-    if (objIdx == AndersNodeFactory::InvalidIndex) {
-      valIdx = nodeFactory.createValueNode(aggregate, newFields);
+    if (objIdx == AndersNodeFactory::InvalidIndex)
       objIdx = nodeFactory.createObjectNode(aggregate, newFields);
-      constraints.emplace_back(AndersConstraint::ADDR_OF, valIdx, objIdx);
-    }
 
     addGlobalInitializerConstraints(objIdx, element);
   }
