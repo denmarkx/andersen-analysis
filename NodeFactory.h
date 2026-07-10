@@ -103,7 +103,6 @@ private:
   // take variable arguments.
   llvm::DenseMap<const llvm::Function *, NodeIndex> varargMap;
 
-  DenseMap<std::pair<NodeIndex, FieldType>, NodeIndex> fieldObjectMap;
   DenseMap<NodeIndex, NodeIndex> fieldObjectBaseMap;
 
 public:

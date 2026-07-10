@@ -283,15 +283,15 @@ const DataLayout* AndersNodeFactory::getDataLayout() const {
 }
 
 NodeIndex AndersNodeFactory::getOrCreateFieldObject(NodeIndex baseObj, const FieldType& fields) {
+    const Value *base = getValueForNode(baseObj);
+    assert(base != nullptr);
+
     baseObj = getMergeTarget(baseObj);
-    auto key = std::make_pair(baseObj, fields);
-    auto it = fieldObjectMap.find(key);
-    if (it != fieldObjectMap.end())
-        return it->second;
 
+    if (objNodeMap.contains(base, fields))
+      return objNodeMap[{base, fields}];
 
-    NodeIndex fieldObj = createObjectNode(nullptr);
-    fieldObjectMap[key] = fieldObj;
+    NodeIndex fieldObj = createObjectNode(base, fields);
     fieldObjectBaseMap[fieldObj] = baseObj;
     return fieldObj;
 }
