@@ -197,6 +197,75 @@ void Andersen::addGlobalAggregateConstraints(const llvm::Value *aggregate, const
   }
 }
 
+/**
+ * GEPs are one of those things that can be inlined (see: handleGEPExpression)
+ * where the "inlined" GEP is not considered an instruction.
+*/
+NodeIndex Andersen::findGEPObjectSite(const Value *v) {
+  // If this is an instruction, we just return getValueNode.
+  if (const GetElementPtrInst *instr = dyn_cast<GetElementPtrInst>(v))
+    return nodeFactory.getValueNodeFor(instr);
+
+  const GEPOperator *gep = dyn_cast<GEPOperator>(v);
+  if (!gep) return AndersNodeFactory::InvalidIndex;
+
+  NodeIndex srcIndex = AndersNodeFactory::InvalidIndex;
+  const Value *source = gep->getPointerOperand();
+
+  // If our source is a GEP, we need to resolve the alloc site.
+  if (const GEPOperator *sourceInst = dyn_cast<GEPOperator>(source)) {
+    NodeIndex underlyingSrcIndex = AndersNodeFactory::InvalidIndex;
+
+    // We can assume that the source GEP has been resolved properly.
+    // ..meaning it already has a constraint to an object:
+    auto itr = std::find_if(constraints.begin(), constraints.end(), [&](const AndersConstraint& c) {
+      return (c.getType() == AndersConstraint::ADDR_OF || c.getType() == AndersConstraint::GEP) && c.getDest() == srcIndex;
+    });
+
+    // Best case scenario is itr isnt the end..otherwise, we have to try and find it:
+    if (itr != constraints.end() && itr->getType() != AndersConstraint::GEP)
+      underlyingSrcIndex = itr->getSrc();
+    else {
+      std::queue<NodeIndex> worklist;
+      worklist.push(itr->getSrc());
+
+      while (!worklist.empty()) {
+        NodeIndex current = worklist.front();
+        worklist.pop();
+        for (const AndersConstraint &c : constraints) {
+          if (c.getDest() == current) {
+            if (c.getType() == AndersConstraint::ADDR_OF) {
+              // In this case, the destination is acceptable. Otherwise we'll be getting the object.
+              underlyingSrcIndex = c.getDest();
+              break;
+            }
+            else if (c.getType() == AndersConstraint::GEP) {
+              worklist.push(c.getSrc());
+              break;
+            }
+          }
+        }
+      }
+      if (underlyingSrcIndex != AndersNodeFactory::InvalidIndex)
+        srcIndex = underlyingSrcIndex;
+    }
+  } else {
+    // Otherwise, this should be directly something we can use:
+    // Since this is still a GEP operator, we have to manually supply fields.
+    auto fields = nodeFactory.getFields(gep);
+    srcIndex = nodeFactory.getValueNodeFor(source, fields);
+
+    if (srcIndex == AndersNodeFactory::InvalidIndex) {
+      srcIndex = nodeFactory.createValueNode(source, fields);
+      NodeIndex objIndex = nodeFactory.getValueNodeFor(source);
+      constraints.emplace_back(AndersConstraint::GEP, srcIndex, objIndex, fields);
+    }
+
+  }
+
+  return srcIndex;
+}
+
 void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
   switch (inst->getOpcode()) {
   case Instruction::Alloca: {
@@ -231,7 +300,9 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
   }
   case Instruction::Load: {
     if (inst->getType()->isPointerTy()) {
-      NodeIndex opIndex = nodeFactory.getValueNodeFor(inst->getOperand(0));
+      NodeIndex opIndex = findGEPObjectSite(inst->getOperand(0));
+      if (opIndex == AndersNodeFactory::InvalidIndex)
+        opIndex = nodeFactory.getValueNodeFor(inst->getOperand(0));
       assert(opIndex != AndersNodeFactory::InvalidIndex &&
              "Failed to find load operand node");
       NodeIndex valIndex = nodeFactory.getValueNodeFor(inst);
@@ -244,11 +315,12 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
   case Instruction::Store: {
     if (inst->getOperand(0)->getType()->isPointerTy()) {
       NodeIndex srcIndex = nodeFactory.getValueNodeFor(inst->getOperand(0));
-      assert(srcIndex != AndersNodeFactory::InvalidIndex &&
-             "Failed to find store src node");
-      NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst->getOperand(1));
-      assert(dstIndex != AndersNodeFactory::InvalidIndex &&
-             "Failed to find store dst node");
+      assert(srcIndex != AndersNodeFactory::InvalidIndex && "Failed to find store src node");
+
+      NodeIndex dstIndex = findGEPObjectSite(inst->getOperand(1));
+      if (dstIndex == AndersNodeFactory::InvalidIndex)
+        dstIndex = nodeFactory.getValueNodeFor(inst->getOperand(1));
+      assert(dstIndex != AndersNodeFactory::InvalidIndex && "Failed to find store dst node");
       constraints.emplace_back(AndersConstraint::STORE, dstIndex, srcIndex);
     }
     break;
@@ -256,7 +328,6 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
   case Instruction::GetElementPtr: {
     assert(inst->getType()->isPointerTy());
 
-    // P1 = getelementptr P2, ... --> <Copy/P1/P2>
     const llvm::Value *src = inst->getOperand(0);
     auto fields = nodeFactory.getFields(inst);
 
@@ -264,69 +335,11 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
     NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst);
 
     // If our source is a GEP, we need to resolve the alloc site.
-    if (const GetElementPtrInst *sourceInst = dyn_cast<GetElementPtrInst>(src)) {
-      NodeIndex underlyingSrcIndex = AndersNodeFactory::InvalidIndex;
-
-      // We can assume that the source GEP has been resolved properly.
-      // ..meaning it already has a constraint to an object:
-      auto itr = std::find_if(constraints.begin(), constraints.end(), [&](const AndersConstraint& c) {
-        return (c.getType() == AndersConstraint::ADDR_OF || c.getType() == AndersConstraint::GEP) && c.getDest() == srcIndex;
-      });
-
-      // Best case scenario is itr isnt the end..otherwise, we have to try and find it:
-      if (itr != constraints.end() && itr->getType() != AndersConstraint::GEP)
-        underlyingSrcIndex = itr->getSrc();
-      else {
-        std::queue<NodeIndex> worklist;
-        worklist.push(itr->getSrc());
-
-        while (!worklist.empty()) {
-          NodeIndex current = worklist.front();
-          worklist.pop();
-          for (const AndersConstraint &c : constraints) {
-            if (c.getDest() == current) {
-              if (c.getType() == AndersConstraint::ADDR_OF) {
-                // In this case, the destination is acceptable. Otherwise we'll be getting the object.
-                underlyingSrcIndex = c.getDest();
-                break;
-              }
-              else if (c.getType() == AndersConstraint::GEP) {
-                worklist.push(c.getSrc());
-                break;
-              }
-            }
-          }
-        }
-        if (underlyingSrcIndex != AndersNodeFactory::InvalidIndex)
-          srcIndex = underlyingSrcIndex;
-      }
+    if (const GEPOperator *sourceInst = dyn_cast<GEPOperator>(src)) {
+      srcIndex = findGEPObjectSite(src);
     }
+
     constraints.emplace_back(AndersConstraint::GEP, dstIndex, srcIndex, fields);
-
-    //   if (itr != constraints.end()) {
-    //     // However, we're more interested as the what the actual object is:
-    //     src = nodeFactory.getValueForNode(itr->getSrc());
-    //     assert(src != nullptr && "GEP Constraint failed: underlying src is null.");
-
-    //     // We can change our srcIndex, because it may exist already if we've been through this before.
-    //     srcIndex = nodeFactory.getObjectNodeFor(src, fields);
-    //   }
-    // }
-
-    // if (srcIndex == AndersNodeFactory::InvalidIndex) {
-    //   // We don't create objects for each field when we encounter an allocation
-    //   // ..meaning it's not an oddity if srcIndex is invalid.
-    //   srcIndex = nodeFactory.createObjectNode(src, fields);
-    // }
-
-    // assert(srcIndex != AndersNodeFactory::InvalidIndex &&
-    //        "Failed to find gep src node");
-    // NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst, fields);
-    // assert(dstIndex != AndersNodeFactory::InvalidIndex &&
-    //        "Failed to find gep dst node");
-
-    // constraints.emplace_back(AndersConstraint::ADDR_OF, dstIndex, srcIndex);
-
     break;
   }
   case Instruction::PHI: {

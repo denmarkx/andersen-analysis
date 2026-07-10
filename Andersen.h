@@ -56,6 +56,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Pass.h"
 
 #include <vector>
@@ -94,6 +95,8 @@ private:
   void addReturnConstraintForCall(const llvm::CallBase* cs, const llvm::Function *f);
   void scanFunction(const llvm::Function *f);
   void setupFunctionConstraints(const llvm::Function *f);
+  
+  NodeIndex findGEPObjectSite(const llvm::Value*);
 
   // Helper functions for constraint optimization
   NodeIndex getRefNodeIndex(NodeIndex n) const;

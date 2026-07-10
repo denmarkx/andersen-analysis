@@ -265,28 +265,74 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Global_Nested") {
     assertPtsToContains(loadS2, F3);
 }
 
-// TODO: this is unhandled -- need to think about it a bit more
-TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Inline_GEP") {
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_GEP_Expression") {
     parseAssembly(R"(
         @array = global [2 x ptr] [ptr @F1, ptr @F2], align 8
 
         define void @main() {
-            store ptr @F3, ptr getelementptr inbounds ([2 x ptr], ptr @array, i32 0, i32 1)
+            %load = load ptr, ptr getelementptr inbounds ([2 x ptr], ptr @array, i32 0, i32 1)
+            ret void
+        }
+
+        define void @F1() { ret void }
+        define void @F2() { ret void }
+    )");
+
+    const Function *F1 = findFunction("F1");
+    const Function *F2 = findFunction("F2");
+
+    const Value *load = findInstruction("main", "load");
+
+    assertPtsToSetSize(F1, 1);
+    assertPtsToSetSize(F2, 1);
+    assertPtsToSetSize(load, 1);
+    assertPtsToContains(load, F2);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Nested_GEP_Expression") {
+    parseAssembly(R"(
+        @array = global [2 x [2 x ptr]] [
+            [2 x ptr] [ptr @F1, ptr @F2],
+            [2 x ptr] [ptr @F3, ptr @F4]
+        ]
+
+        define void @main() {
+            %loadA = load ptr, ptr getelementptr ([2 x [2 x ptr]], ptr @array, i64 0, i64 1, i64 1)
+
+            %s1 = getelementptr [2 x [2 x ptr]], ptr @array, i64 0, i64 1, i64 1
+
+            ; Equivalent to loadA.
+            ; Note: constant expr GEPs whose pointer operand reference an SSA
+            ;       instr do not exist (which is why loadB doesnt do a gep).   
+            %loadB = load ptr, ptr %s1
             ret void
         }
 
         define void @F1() { ret void }
         define void @F2() { ret void }
         define void @F3() { ret void }
+        define void @F4() { ret void }
     )");
 
     const Function *F1 = findFunction("F1");
     const Function *F2 = findFunction("F2");
     const Function *F3 = findFunction("F3");
+    const Function *F4 = findFunction("F4");
+
+    const Value *loadA = findInstruction("main", "loadA");
+    const Value *loadB = findInstruction("main", "loadB");
 
     assertPtsToSetSize(F1, 1);
     assertPtsToSetSize(F2, 1);
     assertPtsToSetSize(F3, 1);
+    assertPtsToSetSize(F4, 1);
+
+    assertPtsToSetSize(loadA, 1);
+    assertPtsToSetSize(loadB, 1);
+
+    assertPtsToContains(loadA, F4);
+    assertPtsToContains(loadB, F4);
+
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Pointer_Offset") {
