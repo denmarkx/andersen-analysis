@@ -149,7 +149,7 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "Global_Integer") {
     const Value *value = findInstruction("main", "value");
 
     assertPtsToSetSize(count, 1);
-    // assertPtsToSetEmpty(value); TODO: this asserts on mergetarget..but it should just ret {}
+    assertPtsToSetEmpty(value);
     assertPtsToContains(load, count);
     assertPtsToContains(ptr, count);
 }

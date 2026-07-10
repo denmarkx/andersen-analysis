@@ -67,6 +67,8 @@ llvm::AliasResult Andersen::alias(const Value *valueA, const Value *valueB) {
  * This differs from getPointsToSet in the fact that the context is not the default context ID.
 */
 void Andersen::fillPointsToSet(const llvm::Value* v, PtsSetType &ptsSet) {
+    if (!v->getType()->isPointerTy()) return;
+
     NodeIndex ptrTgt = nodeFactory.getMergeTarget(
         nodeFactory.getValueNodeFor(v));
     if (ptrTgt == AndersNodeFactory::InvalidIndex) return;
