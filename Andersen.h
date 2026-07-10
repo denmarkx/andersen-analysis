@@ -106,7 +106,6 @@ private:
   void dumpConstraints() const;
   void dumpConstraintsPlainVanilla() const;
   void dumpPtsGraphPlainVanilla() const;
-  void writeGraph() const;
 
 public:
   static char ID;

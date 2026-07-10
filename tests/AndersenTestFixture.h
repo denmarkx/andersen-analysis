@@ -1,8 +1,10 @@
 #pragma once
+#include "include/doctest.h"
 
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/SourceMgr.h>
+#include <llvm/IR/GlobalVariable.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -14,6 +16,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace std;
 using namespace llvm;
@@ -33,7 +36,7 @@ public:
         makeAndersen(*module);
     }
 
-    const Function* getFunction(const string &name) {
+    const Function* findFunction(const string &name) {
         return module->getFunction(name);
     }
 
@@ -50,7 +53,31 @@ public:
     }
 
     const Instruction* findInstruction(const string &functionName, const string &name) {
-        return findInstruction(getFunction(functionName), name);
+        return findInstruction(findFunction(functionName), name);
+    }
+
+    const GlobalVariable* findGlobal(const string &name) {
+        return module->getGlobalVariable(name);
+    }
+
+    void assertPtsToSetEmpty(const Value *v) {
+        std::vector<const Value*> set;
+        andersen->getPointsToSet(v, set);
+        REQUIRE(set.empty());
+    }
+
+    void assertPtsToSetSize(const Value *v, size_t size) {
+        std::vector<const Value*> set;
+        andersen->getPointsToSet(v, set);
+        REQUIRE(size == set.size());
+    }
+
+    void assertPtsToContains(const Value *p, const Value *q) {
+        std::vector<const Value*> set;
+        andersen->getPointsToSet(p, set);
+        REQUIRE(
+            std::find(set.begin(), set.end(), q) != set.end()
+        );
     }
 
 private:

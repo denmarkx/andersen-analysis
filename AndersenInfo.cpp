@@ -34,7 +34,6 @@ bool Andersen::runOnModule(const Module &M) {
     dumpPtsGraphPlainVanilla();
   }
 
-  writeGraph();
   return false;
 }
 
@@ -142,39 +141,6 @@ void Andersen::dumpPtsGraphPlainVanilla() const {
       errs() << "\n";
     }
   }
-}
-
-void Andersen::writeGraph() const {
-  GVC_t *gvc = gvContext();
-  Agraph_t *g = agopen("G", Agdirected, nullptr);
-
-  std::unordered_map<unsigned int, Agnode_t*> m;
-
-  for (unsigned i = 0, e = nodeFactory.getNumNodes(); i < e; ++i) {
-      NodeIndex rep = nodeFactory.getMergeTarget(i);
-      const Value *v = nodeFactory.getValueForNode(rep);
-      if (!v) continue;
-      std::string str = v->getName().str();
-      llvm::raw_string_ostream stream(str);
-      v->print(stream);
-
-      std::string x = stream.str();
-      Agnode_t *n = agnode(g, const_cast<char*>(x.c_str()), 1);
-      m[rep] = n;
-  }
-
-  for (auto &[id, node] : m) {
-      NodeIndex rep = nodeFactory.getMergeTarget(id);
-      auto ptsItr = ptsGraph.find(rep);
-      if (ptsItr != ptsGraph.end()) {
-        for (auto v : ptsItr->second) {
-          Agedge_t *e = agedge(g, node, m[v], "", 1);
-        }
-      }
-  }
-
-  gvLayout(gvc, g, "dot");
-  gvRenderFilename(gvc, g, "png", "output.png");
 }
 
 void AndersenAAWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
