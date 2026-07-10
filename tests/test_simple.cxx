@@ -154,9 +154,6 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "Global_Integer") {
     assertPtsToContains(ptr, count);
 }
 
-// TODO: aliases are improperly implemented.
-// they should not create a new abstract object
-// and instead take the addr of the ptr
 TEST_CASE_FIXTURE(AndersenTestFixture, "Global_Alias") {
     parseAssembly(R"(
         @count = global i32 0
@@ -174,12 +171,12 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "Global_Alias") {
     const Value *count = findGlobal("count");
     const Value *alias = findGlobal("alias");
 
-    // const Value *ptr = findInstruction("main", "ptr");
-    // const Value *load = findInstruction("main", "load");
+    const Value *ptr = findInstruction("main", "ptr");
+    const Value *load = findInstruction("main", "load");
 
-    // assertPtsToSetSize(count, 1);
-    // assertPtsToContains(load, count);
-    // assertPtsToContains(ptr, count);
+    assertPtsToSetSize(count, 1);
+    assertPtsToContains(load, count);
+    assertPtsToContains(ptr, count);
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "Indirect_Call_From_Global_Function_Pointer") {

@@ -89,11 +89,11 @@ void Andersen::collectConstraintsForGlobals(const Module &M) {
     constraints.emplace_back(AndersConstraint::ADDR_OF, gVal, gObj);
   }
 
-  // Aliases are considered their own thing I suppose.
+  // Aliases do not create new objects. Instead, they act as p = &q.
   for (auto const &alias : M.aliases()) {
-    NodeIndex aVal = nodeFactory.createValueNode(&alias);
-    NodeIndex aObj = nodeFactory.createObjectNode(&alias);
-    constraints.emplace_back(AndersConstraint::ADDR_OF, aVal, aObj);
+    NodeIndex aliasIdx = nodeFactory.createValueNode(&alias);
+    NodeIndex aliaseeIdx = nodeFactory.getObjectNodeFor(alias.getAliasee());
+    constraints.emplace_back(AndersConstraint::ADDR_OF, aliasIdx, aliaseeIdx);
   }
 
   // Functions and function pointers are also considered global
@@ -553,16 +553,7 @@ void Andersen::addConstraintForCall(const CallBase* cs) {
       }
     } else // Non-external function call
     {
-      const Type *retTy = cs->getCalledFunction()->getReturnType();
-      if (retTy->isPointerTy() || typeContainsPointer(retTy)) {
-          NodeIndex retIndex = nodeFactory.getValueNodeFor(cs);
-          if (retIndex != AndersNodeFactory::InvalidIndex) {
-              NodeIndex fRetIndex = nodeFactory.getReturnNodeFor(f);
-              if (fRetIndex != AndersNodeFactory::InvalidIndex)
-                  constraints.emplace_back(AndersConstraint::COPY, retIndex, fRetIndex);
-          }
-      }
-      // The argument constraints
+      addReturnConstraintForCall(cs, f);
       addArgumentConstraintForCall(cs, f);
     }
   }
