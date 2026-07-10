@@ -12,7 +12,7 @@ int main(int argc, char *argv[]) {
     LLVMContext ctx;
     SMDiagnostic error;
 
-    std::unique_ptr<Module> module = parseIRFile("test.ll", error, ctx);
+    std::unique_ptr<Module> module = parseIRFile("files/test.ll", error, ctx);
 
     if (module == nullptr) {
         error.print("", errs());
