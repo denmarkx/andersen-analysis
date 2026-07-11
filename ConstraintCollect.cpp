@@ -1,6 +1,7 @@
 #include "Andersen.h"
 #include "Constraint.h"
 #include "NodeFactory.h"
+#include "NodeMapUtil.h"
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
@@ -252,7 +253,7 @@ NodeIndex Andersen::findGEPObjectSite(const Value *v) {
   } else {
     // Otherwise, this should be directly something we can use:
     // Since this is still a GEP operator, we have to manually supply fields.
-    auto fields = nodeFactory.getFields(gep);
+    auto fields = NodeMapUtil::getFields(v);
     srcIndex = nodeFactory.getValueNodeFor(source, fields);
 
     if (srcIndex == AndersNodeFactory::InvalidIndex) {
@@ -329,7 +330,7 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
     assert(inst->getType()->isPointerTy());
 
     const llvm::Value *src = inst->getOperand(0);
-    auto fields = nodeFactory.getFields(inst);
+    auto fields = NodeMapUtil::getFields(inst);
 
     NodeIndex srcIndex = nodeFactory.getValueNodeFor(src);
     NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst);

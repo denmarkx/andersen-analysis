@@ -10,7 +10,6 @@ static bool DumpResultInfo = 1;
 static bool SilenceEmptyPtsSetInfo = true;
 
 bool Andersen::runOnModule(const Module &M) {
-  nodeFactory.setDataLayout(&M.getDataLayout());
   collectConstraints(M);
 
   if (DumpDebugInfo)

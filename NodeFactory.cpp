@@ -1,4 +1,5 @@
 #include "NodeFactory.h"
+#include "NodeMapUtil.h"
 #include "NodeMap.h"
 
 #include "llvm/ADT/SmallVector.h"
@@ -37,7 +38,7 @@ NodeIndex AndersNodeFactory::createValueNode(const Value *val, FieldType fields)
   if (val != nullptr) {
     assert(!valueNodeMap.contains(val, fields) &&
            "Trying to insert two mappings to valueNodeMap!");
-    valueNodeMap[{val, fields}] = nextIdx;
+    valueNodeMap.insert(val, fields, nextIdx);
   }
   nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, val, fields));
   return nextIdx;
@@ -48,7 +49,7 @@ NodeIndex AndersNodeFactory::createObjectNode(const Value *val, FieldType fields
   if (val != nullptr) {
     assert(!objNodeMap.contains(val, fields) &&
            "Trying to insert two mappings to objNodeMap!");
-    objNodeMap[{val, fields}] = nextIdx;
+    objNodeMap.insert(val, fields, nextIdx);
   }
 
   nodes.push_back(AndersNode(AndersNode::OBJ_NODE, nextIdx, val, fields));
@@ -80,7 +81,7 @@ NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val, FieldType fields)
     if (!isa<GlobalValue>(c))
       return getValueNodeForConstant(c, fields);
   }
-  return valueNodeMap.find(val, fields);
+  return valueNodeMap.get(val, fields);
 }
 
 NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c, FieldType fields) {
@@ -95,7 +96,7 @@ NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c, Fi
     // Pointer to any field within a struct is treated as a pointer to the first
     // field
     case Instruction::GetElementPtr: {
-      FieldType fields = getFields(c);
+      FieldType fields = NodeMapUtil::getFields(c);
       NodeIndex base = getValueNodeFor(c->getOperand(0), {});
       if (base == InvalidIndex)
           return InvalidIndex;
@@ -123,7 +124,7 @@ NodeIndex AndersNodeFactory::getObjectNodeFor(const Value *val, FieldType fields
   if (const Constant *c = dyn_cast<Constant>(val))
     if (!isa<GlobalValue>(c))
       return getObjectNodeForConstant(c, fields);
-  return objNodeMap.find(val, fields);
+  return objNodeMap.get(val, fields);
 }
 
 NodeIndex
@@ -167,19 +168,6 @@ NodeIndex AndersNodeFactory::getVarargNodeFor(const llvm::Function *f) const {
   return itr != varargMap.end()
     ? itr->second
     : InvalidIndex;
-}
-
-/*
- * [deprecated, use lookupFields]
-*/
-llvm::SmallVector<unsigned int, 4> AndersNodeFactory::getFields(const llvm::Value *v) const {
-  return valueNodeMap.getFields(v);
-}
-
-std::vector<FieldType> AndersNodeFactory::lookupFields(AndersNode::AndersNodeType type, const llvm::Value *v) const {
-  return type == AndersNode::VALUE_NODE ?
-    valueNodeMap.lookupFields(v) :
-    objNodeMap.lookupFields(v);
 }
 
 void AndersNodeFactory::mergeNode(NodeIndex n0, NodeIndex n1) {
@@ -272,16 +260,6 @@ void AndersNodeFactory::dumpRepInfo() const {
   errs() << "----- End of Print -----\n";
 }
 
-void AndersNodeFactory::setDataLayout(const DataLayout *layout) {
-  valueNodeMap.setDataLayout(layout);
-  objNodeMap.setDataLayout(layout);
-  _layout = layout;
-}
-
-const DataLayout* AndersNodeFactory::getDataLayout() const {
-  return _layout;
-}
-
 NodeIndex AndersNodeFactory::getOrCreateFieldObject(NodeIndex baseObj, const FieldType& fields) {
     const Value *base = getValueForNode(baseObj);
     assert(base != nullptr);
@@ -289,7 +267,7 @@ NodeIndex AndersNodeFactory::getOrCreateFieldObject(NodeIndex baseObj, const Fie
     baseObj = getMergeTarget(baseObj);
 
     if (objNodeMap.contains(base, fields))
-      return objNodeMap[{base, fields}];
+      return objNodeMap.get(base, fields);
 
     NodeIndex fieldObj = createObjectNode(base, fields);
     fieldObjectBaseMap[fieldObj] = baseObj;

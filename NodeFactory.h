@@ -66,7 +66,6 @@ public:
 // std::unique_ptr and heap allocations. Therefore, we use plain integers to
 // represent nodes for public functions like createXXX and getXXX. This is ugly,
 // but it is efficient.
-typedef llvm::DenseMap<std::pair<const Context*, const llvm::Value*>, NodeIndex> NodeMapType;
 
 class AndersNodeFactory {
 public:
@@ -108,8 +107,6 @@ private:
 public:
   AndersNodeFactory();
 
-  Context* _globalCtx;
-
   // Factory methods
   NodeIndex createValueNode(const llvm::Value *val = nullptr, FieldType fields={});
   NodeIndex createObjectNode(const llvm::Value *val = nullptr, FieldType fields={});
@@ -125,11 +122,6 @@ public:
   NodeIndex getVarargNodeFor(const llvm::Function *f) const;
   NodeIndex getOrCreateFieldObject(NodeIndex baseObj, const FieldType& fields);
   NodeIndex getFieldBaseObject(NodeIndex fieldObj) const;
-
-  // [deprecated] - use lookupFields
-  llvm::SmallVector<unsigned int, 4> getFields(const llvm::Value *v) const;
-
-  std::vector<FieldType> lookupFields(AndersNode::AndersNodeType type, const llvm::Value *v) const;
 
   // Node merge interfaces
   void mergeNode(NodeIndex n0, NodeIndex n1); // Merge n1 into n0
@@ -164,10 +156,6 @@ public:
 
   // Size getters
   unsigned getNumNodes() const { return nodes.size(); }
-
-  void setDataLayout(const DataLayout *layout);
-  const DataLayout* getDataLayout() const;
-  const DataLayout *_layout = nullptr;
 
   // For debugging purpose
   void dumpNode(NodeIndex) const;
