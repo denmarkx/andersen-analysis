@@ -6,6 +6,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Module.h"
+#include <queue>
 using namespace llvm;
 
 namespace NodeMapUtil {
@@ -193,5 +194,62 @@ namespace NodeMapUtil {
         }
 
         return fields;
+    }
+
+    /*
+     * Returns boolean if the first-class aggregate type (IE: struct or array) contains a pointer.
+    */
+    inline bool aggregateContainsPointer(const Type* type) {
+        if (type->isPointerTy()) return true;
+        if (type->isArrayTy())
+            return aggregateContainsPointer(type->getArrayElementType());
+        if (type->isStructTy()) {
+            for (unsigned i = 0; i < type->getStructNumElements(); ++i)
+                if (aggregateContainsPointer(type->getStructElementType(i))) return true;
+        }
+        return false;
+    }
+
+    inline void populateAggregateFields(const Type* type, const FieldType &fields, SmallVector<FieldType, 4>& allFields) {
+        if (!type->isAggregateType()) return;
+
+        for (unsigned int i=0; i < type->getNumContainedTypes(); i++) {
+            FieldType currentFields;
+            currentFields.append(fields);
+            currentFields.push_back(i);
+
+            if (type->getStructElementType(i)->isAggregateType()) {
+                populateAggregateFields(type->getStructElementType(i), currentFields, allFields);
+                continue;
+            }
+
+            allFields.push_back(currentFields);
+        }
+    }
+
+    /*
+     * Returns vector of field paths for each pointer in a first-class aggregate.
+    */
+    inline SmallVector<FieldType, 4> getAggregateFields(const Type* type) {
+        if (!type->isAggregateType()) return {};
+
+        SmallVector<FieldType, 4> allFields;
+
+        for (unsigned int i=0; i < type->getNumContainedTypes(); i++) {
+            FieldType fields;
+            fields.push_back(i);
+            const Type *innerType = type->getStructElementType(i);
+            populateAggregateFields(innerType, fields, allFields);
+        }
+
+        errs() << "getAggregateFields for: " << *type << "\n";
+        for (const auto &ft : allFields) {
+            errs() << "Fields = [";
+            for (const auto &x : ft) {
+                errs() << x << " ";
+            }
+            errs() << "]\n";
+        }
+        return allFields;
     }
 };

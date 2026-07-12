@@ -41,7 +41,28 @@ NodeIndex AndersNodeFactory::createValueNode(const Value *val, FieldType fields)
     valueNodeMap.insert(val, fields, nextIdx);
   }
   nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, val, fields));
+  createDerivedValueNode(val);
   return nextIdx;
+}
+
+/*
+ * For a value node whose value is an aggregate that contains a pointer,
+ * this eagerly iterates through the aggregate type and creates derived node indices.
+ * The original value is instead treated as a symbolic "base" value.
+ *
+ * Note: This is solving a different problem within field-sensitivity and has
+ *       very little to do with GEPs, which is why this is exclusive to values only.
+ *       Additionally, this is only for first-class aggregates: structs and arrays.
+*/
+NodeIndex AndersNodeFactory::createDerivedValueNode(const Value *v) {
+  if (!v) return ~0U;
+  const Type *type = v->getType();
+
+  if (!type->isAggregateType() || !NodeMapUtil::aggregateContainsPointer(type))
+    return ~0U;
+
+  NodeMapUtil::getAggregateFields(type);
+  return -1;
 }
 
 NodeIndex AndersNodeFactory::createObjectNode(const Value *val, FieldType fields) {

@@ -122,6 +122,7 @@ public:
   NodeIndex createObjectNode(const llvm::Value *val = nullptr, FieldType fields={});
   NodeIndex createReturnNode(const llvm::Function *f);
   NodeIndex createVarargNode(const llvm::Function *f);
+  NodeIndex createDerivedValueNode(const llvm::Value*);
 
   // Map lookup interfaces (return InvalidIndex if value not found)
   NodeIndex getValueNodeFor(const llvm::Value *val, FieldType fields={});
