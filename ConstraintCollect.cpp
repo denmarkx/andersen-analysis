@@ -63,56 +63,54 @@ void Andersen::addConstraint(AndersConstraint::ConstraintType type,
     const Value *valueA, NodeIndex idxA,
     const Value *valueB, NodeIndex idxB) {
 
-    const auto createAggregateConstraints = [&](NodeIndex originalIdx,
-                            const Value* original, NodeIndex base) {
+    const auto createAggregateConstraints = [&](NodeIndex originalIdx, const Value* original, NodeIndex base) {
         SmallVector<NodeIndex, 4> aggregates;
-        unsigned int i = 0;
         for (const NodeIndex &idx : nodeFactory.getAggregateChildren(base)) {
             // For the case of returns, the base is still accepted and put in returnMap.
             // ..however, the "children" of that base are values..which is okay.
-            NodeIndex childIdx = nodeFactory.createValueNode(original, {i});
+            NodeIndex childIdx = nodeFactory.createValueNode(original, nodeFactory.getFields(idx));
             constraints.emplace_back(type, childIdx, idx);
             aggregates.push_back(childIdx);
-            i++;
         }
         nodeFactory.registerBaseAggregate(originalIdx, aggregates);
     };
 
     // If idxA or B is a base aggregate, the opposite then also becomes a base aggregate.
-    if (nodeFactory.isBaseAggregate(idxB))
+    if (nodeFactory.isBaseAggregate(idxB)) {
         createAggregateConstraints(idxA, valueA, idxB);
-    else if (nodeFactory.isBaseAggregate(idxA))
+        return;
+    }
+    else if (nodeFactory.isBaseAggregate(idxA)) {
         createAggregateConstraints(idxB, valueB, idxA);
+        return;
+    }
 
     // Loads will use idxA (idx of the load's SSA value)
     //   and have it act as a "base" value.
     if (type == AndersConstraint::ConstraintType::LOAD) {
         const Type *valueAType = valueA->getType();
         if (valueAType->isAggregateType()) {
-            unsigned int numElements = 0;
-            if (isa<StructType>(valueAType))
-                numElements = valueAType->getStructNumElements();
-            else
-                numElements = valueAType->getArrayNumElements();
+            if (isa<GlobalValue>(valueB)) {
+                // Create new value nodes for each element:
+                SmallVector<NodeIndex, 4> aggregates;
+                for (const FieldType& fields : nodeFactory.getGlobalAggregateFields(idxB)) {
+                    NodeIndex childIdx = nodeFactory.createValueNode(valueA, fields);
 
-            // Create new value nodes for each element:
-            SmallVector<NodeIndex, 4> aggregates;
-            for (unsigned int i=0; i < numElements; i++) {
-                NodeIndex childIdx = nodeFactory.createValueNode(valueA, {i});
+                    // Get the appropriate value field for the struct:
+                    NodeIndex valueBFieldIdx = nodeFactory.getValueNodeFor(valueB, fields);
+                    assert(valueBFieldIdx != AndersNodeFactory::InvalidIndex);
 
-                // Get the appropriate value field for the struct:
-                NodeIndex valueBFieldIdx = nodeFactory.getValueNodeFor(valueB, {i});
-                assert(valueBFieldIdx != AndersNodeFactory::InvalidIndex);
-
-                // Constraint gets added only to the children.
-                constraints.emplace_back(type, childIdx, valueBFieldIdx);
-                aggregates.push_back(childIdx);
+                    // Constraint gets added only to the children.
+                    constraints.emplace_back(type, childIdx, valueBFieldIdx);
+                    aggregates.push_back(childIdx);
+                }
+                nodeFactory.registerBaseAggregate(idxA, aggregates);
+                return;
             }
-
-            nodeFactory.registerBaseAggregate(idxA, aggregates);
         }
-        return;
     }
+
+    constraints.emplace_back(type, idxA, idxB);
 }
 
 void Andersen::scanFunction(const llvm::Function *f) {
@@ -246,6 +244,9 @@ void Andersen::addGlobalAggregateConstraints(const llvm::Value *aggregate, const
       objIdx = nodeFactory.createObjectNode(aggregate, newFields);
       constraints.emplace_back(AndersConstraint::ADDR_OF, valIdx, objIdx);
     }
+
+    NodeIndex baseValIdx = nodeFactory.getValueNodeFor(aggregate);
+    nodeFactory.insertGlobalAggregateFields(baseValIdx, newFields);
 
     addGlobalInitializerConstraints(objIdx, element);
   }

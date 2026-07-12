@@ -76,6 +76,14 @@ NodeIndex AndersNodeFactory::createVarargNode(const llvm::Function *f) {
   return nextIdx;
 }
 
+void AndersNodeFactory::insertGlobalAggregateFields(NodeIndex idx, FieldType fields) {
+  _globalFieldMap[idx].push_back(fields);
+}
+
+const llvm::SmallVector<FieldType, 4>& AndersNodeFactory::getGlobalAggregateFields(NodeIndex idx) const {
+  return _globalFieldMap.at(idx);
+}
+
 void AndersNodeFactory::registerBaseAggregate(NodeIndex base, llvm::SmallVector<NodeIndex, 4> children) {
   assert(!_baseAggregateMap.contains(base) && "Trying to register base aggregate more than once.");
   _baseAggregateMap[base] = std::move(children);
@@ -87,6 +95,11 @@ bool AndersNodeFactory::isBaseAggregate(NodeIndex base) const {
 
 const llvm::SmallVector<NodeIndex, 4>& AndersNodeFactory::getAggregateChildren(NodeIndex base) const {
   return _baseAggregateMap.at(base);
+}
+
+const llvm::SmallVector<NodeIndex, 4>& AndersNodeFactory::getFields(NodeIndex idx) const {
+  assert(idx < nodes.size() && "Invalid node index sent to getFields.");
+  return nodes[idx].getFields();
 }
 
 NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val, FieldType fields) {

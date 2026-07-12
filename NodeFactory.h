@@ -41,6 +41,7 @@ public:
 
   NodeIndex getIndex() const { return idx; }
   const llvm::Value *getValue() const { return value; }
+  const llvm::SmallVector<unsigned int, 4>& getFields() const { return _fields; }
 
   void printFields() const {
     errs() << "[";
@@ -107,6 +108,10 @@ private:
   // for %load, and create the relation {load: [load.0, load.1]} here.
   llvm::DenseMap<NodeIndex, SmallVector<NodeIndex, 4>> _baseAggregateMap;
 
+  // _globalFieldMap: Since we already eagerly create values for global aggregates,
+  // ..and we may need them during constraint collection, they are kept in here.
+  llvm::DenseMap<NodeIndex, SmallVector<FieldType, 4>> _globalFieldMap;
+
   DenseMap<NodeIndex, NodeIndex> fieldObjectBaseMap;
 
 public:
@@ -128,9 +133,14 @@ public:
   NodeIndex getOrCreateFieldObject(NodeIndex baseObj, const FieldType& fields);
   NodeIndex getFieldBaseObject(NodeIndex fieldObj) const;
 
+  // Aggregate-related functions:
+  void insertGlobalAggregateFields(NodeIndex, FieldType);
   void registerBaseAggregate(NodeIndex, llvm::SmallVector<NodeIndex, 4>);
-  const llvm::SmallVector<NodeIndex, 4>& getAggregateChildren(NodeIndex) const;
   bool isBaseAggregate(NodeIndex) const;
+
+  const llvm::SmallVector<FieldType, 4>& getGlobalAggregateFields(NodeIndex) const;
+  const llvm::SmallVector<NodeIndex, 4>& getAggregateChildren(NodeIndex) const;
+  const llvm::SmallVector<NodeIndex, 4>& getFields(NodeIndex) const;
 
   // Node merge interfaces
   void mergeNode(NodeIndex n0, NodeIndex n1); // Merge n1 into n0
