@@ -1,6 +1,7 @@
 #pragma once
 #include "include/doctest.h"
 
+#include <algorithm>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/SourceMgr.h>
@@ -77,6 +78,14 @@ public:
         andersen->getPointsToSet(p, set);
         REQUIRE(
             std::find(set.begin(), set.end(), q) != set.end()
+        );
+    }
+
+    void assertPtsToExact(const Value *p, vector<const Value*> qs) {
+        std::vector<const Value*> set;
+        andersen->getPointsToSet(p, set);
+        REQUIRE(
+            std::is_permutation(set.begin(), set.end(), qs.begin())
         );
     }
 

@@ -12,6 +12,15 @@
 
 #include <queue>
 
+// TODO: DNI
+static void print_field_vec(SmallVector<unsigned int, 4> &fields) {
+    errs() << "Fields: [";
+    for (const auto &x: fields) {
+        errs() << x << " ";
+    }
+    errs() << "]\n";
+}
+
 using namespace llvm;
 
 // CollectConstraints - This stage scans the program, adding a constraint to the
@@ -499,23 +508,46 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
     break;
   }
   case Instruction::ExtractValue: {
-      if (!inst->getType()->isPointerTy()) break;
-      NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst);
-      assert(dstIndex != AndersNodeFactory::InvalidIndex);
+    if (!typeContainsPointer(inst->getType())) break;
+    NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst);
+    assert(dstIndex != AndersNodeFactory::InvalidIndex);
 
-      const ExtractValueInst *evi = cast<ExtractValueInst>(inst);
-      const Value *aggOp = evi->getAggregateOperand();
+    const ExtractValueInst *evi = cast<ExtractValueInst>(inst);
+    const Value *aggOp = evi->getAggregateOperand();
 
-      SmallVector<unsigned int, 4> indices;
-      for (const unsigned int &i : evi->indices())
-        indices.push_back(i);
+    SmallVector<unsigned int, 4> indices = {evi->indices().begin(), evi->indices().end()};
 
-      if (!isa<Constant>(aggOp)) {
-          NodeIndex srcIndex = nodeFactory.getValueNodeFor(aggOp, indices);
-          if (srcIndex != AndersNodeFactory::InvalidIndex)
-              constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex);
-      }
-      break;
+    NodeIndex srcIndex = nodeFactory.getValueNodeFor(aggOp);
+    assert(srcIndex != AndersNodeFactory::InvalidIndex);
+
+    SmallVector<NodeIndex, 4> children;
+
+    // This sort of does what addConstraint would've done, but geared specifically toward EVs.
+    for (const auto &x : nodeFactory.getAggregateChildren(srcIndex)) {
+        // We're looking for where the first n indices (n=len(indices)) match.
+        auto fields = nodeFactory.getFields(x);
+        if (fields.size() < indices.size()) continue;
+
+        auto slice = SmallVector<unsigned int, 4>{fields.begin(), fields.begin() + indices.size()};
+        if (slice != indices) continue;
+
+        // Next, there's two options here:
+        // Either there is no remainder.. meaning we add the direct constraint
+        auto remainder = SmallVector<unsigned int, 4>{fields.begin() + indices.size(), fields.end()};
+        if (remainder.empty()) {
+            // Constraint is directly added: dstIndex = x.
+            constraints.emplace_back(AndersConstraint::COPY, dstIndex, x);
+            break;
+        }
+
+        // ..or there IS a remainder and we "clone" the children and this becomes a base aggregate.
+        NodeIndex childIdx = nodeFactory.createValueNode(inst, remainder);
+        constraints.emplace_back(AndersConstraint::COPY, childIdx, x);
+        children.push_back(childIdx);
+    }
+
+    nodeFactory.registerBaseAggregate(dstIndex, children);
+    break;
   }
   case Instruction::InsertValue: {
       if (!typeContainsPointer(inst->getType())) break;

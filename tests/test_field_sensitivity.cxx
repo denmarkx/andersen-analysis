@@ -470,6 +470,7 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Extract_Value_Global_Nested_Struct") 
     const Value *fieldB = findInstruction("main", "fieldB");
     const Value *fieldC = findInstruction("main", "fieldC");
 
+    assertPtsToSetEmpty(load);
     assertPtsToSetSize(fieldA, 1);
     assertPtsToSetSize(fieldB, 1);
     assertPtsToSetSize(fieldC, 1);
@@ -477,4 +478,41 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Extract_Value_Global_Nested_Struct") 
     assertPtsToContains(fieldA, F1);
     assertPtsToContains(fieldB, F2);
     assertPtsToContains(fieldC, F3);
+}
+
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Nested_Extract_Value_Global_Struct") {
+    parseAssembly(R"(
+        %Struct = type { ptr, { ptr, ptr } }
+        @struct = global %Struct { ptr @F1, { ptr, ptr } { ptr @F2, ptr @F3 } } 
+
+        define void @main() {
+            %load = load %Struct, ptr @struct
+            %fieldA = extractvalue %Struct %load, 1
+            %fieldB = extractvalue { ptr, ptr } %fieldA, 1
+            %fieldC = extractvalue %Struct %load, 1, 0
+            %fieldD = extractvalue %Struct %load, 0
+            ret void
+        }
+
+        define void @F1() { ret void }
+        define void @F2() { ret void }
+        define void @F3() { ret void }
+    )");
+
+    const Value *F1 = findFunction("F1");
+    const Value *F2 = findFunction("F2");
+    const Value *F3 = findFunction("F3");
+
+    const Value *load = findInstruction("main", "load");
+    const Value *fieldA = findInstruction("main", "fieldA");
+    const Value *fieldB = findInstruction("main", "fieldB");
+    const Value *fieldC = findInstruction("main", "fieldC");
+    const Value *fieldD = findInstruction("main", "fieldD");
+
+    assertPtsToSetEmpty(load);
+    assertPtsToSetEmpty(fieldA);
+    assertPtsToExact(fieldB, {F3});
+    assertPtsToExact(fieldC, {F2});
+    assertPtsToExact(fieldD, {F1});
 }
