@@ -95,6 +95,7 @@ private:
   void addReturnConstraintForCall(const llvm::CallBase* cs, const llvm::Function *f);
   void scanFunction(const llvm::Function *f);
   void setupFunctionConstraints(const llvm::Function *f);
+  void addConstraint(AndersConstraint::ConstraintType, const Value*, NodeIndex, const Value*, NodeIndex);
   
   NodeIndex findGEPObjectSite(const llvm::Value*);
 

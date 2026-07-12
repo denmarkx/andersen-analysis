@@ -406,3 +406,31 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Byte_Offset") {
     assertPtsToContains(loadS1, x);
     assertPtsToContains(loadS2, x);
 }
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Extract_Value_Global_Struct") {
+    parseAssembly(R"(
+        @struct = global { ptr, ptr } { ptr @F1, ptr @F2 } 
+
+        define { ptr, ptr } @Function() {
+            %load = load { ptr, ptr }, ptr @struct
+            ret { ptr, ptr } %load
+        }
+
+        define void @main() {
+            %ptr = call { ptr, ptr } @Function()
+            %fieldA = extractvalue { ptr, ptr } %ptr, 0
+            %fieldB = extractvalue { ptr, ptr } %ptr, 1
+            ret void
+        }
+
+        define void @F1() { ret void }
+        define void @F2() { ret void }
+    )");
+
+    const Value *ptr = findInstruction("main", "ptr");
+    const Value *fieldA = findInstruction("main", "fieldA");
+    const Value *fieldB = findInstruction("main", "fieldB");
+    andersen->printPointsToSet(fieldA);
+    andersen->printPointsToSet(fieldB);
+}
+

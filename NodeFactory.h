@@ -102,6 +102,11 @@ private:
   // take variable arguments.
   llvm::DenseMap<const llvm::Function *, NodeIndex> varargMap;
 
+  // _baseAggregateMap: For the case of %load { ptr, ptr } ...,
+  // we create new value nodes for both pointers (load.0, load.1), void the constraint
+  // for %load, and create the relation {load: [load.0, load.1]} here.
+  llvm::DenseMap<NodeIndex, SmallVector<NodeIndex, 4>> _baseAggregateMap;
+
   DenseMap<NodeIndex, NodeIndex> fieldObjectBaseMap;
 
 public:
@@ -122,6 +127,10 @@ public:
   NodeIndex getVarargNodeFor(const llvm::Function *f) const;
   NodeIndex getOrCreateFieldObject(NodeIndex baseObj, const FieldType& fields);
   NodeIndex getFieldBaseObject(NodeIndex fieldObj) const;
+
+  void registerBaseAggregate(NodeIndex, llvm::SmallVector<NodeIndex, 4>);
+  const llvm::SmallVector<NodeIndex, 4>& getAggregateChildren(NodeIndex) const;
+  bool isBaseAggregate(NodeIndex) const;
 
   // Node merge interfaces
   void mergeNode(NodeIndex n0, NodeIndex n1); // Merge n1 into n0

@@ -76,6 +76,19 @@ NodeIndex AndersNodeFactory::createVarargNode(const llvm::Function *f) {
   return nextIdx;
 }
 
+void AndersNodeFactory::registerBaseAggregate(NodeIndex base, llvm::SmallVector<NodeIndex, 4> children) {
+  assert(!_baseAggregateMap.contains(base) && "Trying to register base aggregate more than once.");
+  _baseAggregateMap[base] = std::move(children);
+}
+
+bool AndersNodeFactory::isBaseAggregate(NodeIndex base) const {
+  return _baseAggregateMap.contains(base);
+}
+
+const llvm::SmallVector<NodeIndex, 4>& AndersNodeFactory::getAggregateChildren(NodeIndex base) const {
+  return _baseAggregateMap.at(base);
+}
+
 NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val, FieldType fields) {
   if (const Constant *c = dyn_cast<Constant>(val)) {
     if (!isa<GlobalValue>(c))
