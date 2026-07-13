@@ -38,6 +38,83 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Simple") {
     assertPtsToContains(loadS2, y);
 }
 
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Simple_Null") {
+    parseAssembly(R"(
+        %S = type { i64, i64, ptr }
+
+        define void @main() {
+            %ptr = alloca %S
+
+            %s1 = getelementptr inbounds %S, ptr %ptr, i32 0, i32 2
+            store ptr null, ptr %s1
+
+            %loadS1 = load ptr, ptr %s1
+            ret void
+        }
+    )");
+
+    const Value *ptr = findInstruction("main", "ptr");
+    const Value *loadS1 = findInstruction("main", "loadS1");
+
+    assertPtsToSetSize(ptr, 1);
+    assertPtsToSetEmpty(loadS1);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Interprocedural_Null") {
+    parseAssembly(R"(
+        %S = type { i64, i64, ptr }
+
+        define void @Function(ptr %0) {
+            %loadS1 = load ptr, ptr %0
+            ret void
+        }
+
+        define void @main() {
+            %ptr = alloca %S
+
+            %s1 = getelementptr inbounds %S, ptr %ptr, i32 0, i32 2
+            store ptr null, ptr %s1
+
+            call void @Function(ptr %s1)
+            ret void
+        }
+    )");
+
+    const Value *ptr = findInstruction("main", "ptr");
+    const Value *loadS1 = findInstruction("Function", "loadS1");
+
+    assertPtsToSetSize(ptr, 1);
+    assertPtsToSetEmpty(loadS1);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Interprocedural_Nested_Null") {
+    parseAssembly(R"(
+        %T = type { ptr, i64 }
+        %S = type { i64, i64, %T }
+
+        define void @Function(ptr %0) {
+            %loadS1 = load ptr, ptr %0
+            ret void
+        }
+
+        define void @main() {
+            %ptr = alloca %S
+
+            %s1 = getelementptr inbounds %S, ptr %ptr, i32 0, i32 2
+            store ptr null, ptr %s1
+
+            call void @Function(ptr %s1)
+            ret void
+        }
+    )");
+
+    const Value *ptr = findInstruction("main", "ptr");
+    const Value *loadS1 = findInstruction("Function", "loadS1");
+
+    assertPtsToSetSize(ptr, 1);
+    assertPtsToSetEmpty(loadS1);
+}
+
 TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Simple_Nested") {
     parseAssembly(R"(
         %S = type { [8 x ptr], ptr }

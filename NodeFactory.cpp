@@ -325,6 +325,10 @@ void AndersNodeFactory::dumpRepInfo() const {
 }
 
 NodeIndex AndersNodeFactory::getOrCreateFieldObject(NodeIndex baseObj, const FieldType& fields) {
+    // It's not necessarily an error if base is null here IF baseObj is a special index.
+    if (baseObj == NullPtrIndex || baseObj == NullObjectIndex)
+      return baseObj;
+
     const Value *base = getValueForNode(baseObj);
     assert(base != nullptr);
 
