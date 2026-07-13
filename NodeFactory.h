@@ -135,12 +135,10 @@ public:
   NodeIndex getFieldBaseObject(NodeIndex fieldObj) const;
 
   // Aggregate-related functions:
-  void insertGlobalAggregateFields(NodeIndex, FieldType);
   void registerBaseAggregate(NodeIndex, llvm::SmallVector<NodeIndex, 4>);
   bool isBaseAggregate(NodeIndex) const;
 
-  const llvm::SmallVector<FieldType, 4>& getGlobalAggregateFields(NodeIndex) const;
-  const llvm::SmallVector<NodeIndex, 4>& getAggregateChildren(NodeIndex) const;
+  const llvm::ArrayRef<NodeIndex> getAggregateChildren(NodeIndex) const;
   const llvm::SmallVector<NodeIndex, 4>& getFields(NodeIndex) const;
 
   // Node merge interfaces
