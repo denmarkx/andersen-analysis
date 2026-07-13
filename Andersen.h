@@ -88,7 +88,6 @@ private:
   void collectConstraintsForGlobals(const llvm::Module &);
   void collectConstraintsForInstruction(const llvm::Instruction *);
   void addGlobalInitializerConstraints(NodeIndex, const llvm::Constant *);
-  void addGlobalAggregateConstraints(const llvm::Value *aggregate, const llvm::Constant *, FieldType &fields);
   void addConstraintForCall(const llvm::CallBase* cs);
   bool addConstraintForExternalLibrary(const llvm::CallBase* cs, const llvm::Function *f);
   void addArgumentConstraintForCall(const llvm::CallBase* cs, const llvm::Function *f);

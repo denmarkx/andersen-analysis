@@ -33,7 +33,7 @@ AndersNodeFactory::AndersNodeFactory() {
   assert(nodes.size() == 4);
 }
 
-NodeIndex AndersNodeFactory::createValueNode(const Value *val, FieldType fields) {
+NodeIndex AndersNodeFactory::createValueNode(const Value *val, FieldType fields, bool isDerived) {
   unsigned nextIdx = nodes.size();
   if (val != nullptr) {
     assert(!valueNodeMap.contains(val, fields) &&
@@ -41,7 +41,8 @@ NodeIndex AndersNodeFactory::createValueNode(const Value *val, FieldType fields)
     valueNodeMap.insert(val, fields, nextIdx);
   }
   nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, val, fields));
-  createDerivedValueNode(val);
+  if (!isDerived)
+    createDerivedValueNode(val, nextIdx);
   return nextIdx;
 }
 
@@ -54,15 +55,28 @@ NodeIndex AndersNodeFactory::createValueNode(const Value *val, FieldType fields)
  *       very little to do with GEPs, which is why this is exclusive to values only.
  *       Additionally, this is only for first-class aggregates: structs and arrays.
 */
-NodeIndex AndersNodeFactory::createDerivedValueNode(const Value *v) {
-  if (!v) return ~0U;
-  const Type *type = v->getType();
+void AndersNodeFactory::createDerivedValueNode(const Value *base, NodeIndex baseIdx, const Type* baseType) {
+  if (!base) return;
+  const Type *type = (baseType != nullptr) ? baseType : base->getType();
 
   if (!type->isAggregateType() || !NodeMapUtil::aggregateContainsPointer(type))
-    return ~0U;
+    return;
 
-  NodeMapUtil::getAggregateFields(type);
-  return -1;
+  SmallVector<NodeIndex, 4> childIdxs;
+  for (FieldType &fields : NodeMapUtil::getAggregateFields(type)) {
+    // If fields is strictly [0], then we use the base.
+    if (fields.size() == 1 && fields[0] == 0) {
+      // Technically, this is still a "child", but it's just the same thing.
+      childIdxs.push_back(baseIdx);
+      continue;
+    };
+
+    NodeIndex childIdx = createValueNode(base, fields, true);
+    childIdxs.push_back(childIdx);
+  }
+
+  registerBaseAggregate(baseIdx, childIdxs);
+  return;
 }
 
 NodeIndex AndersNodeFactory::createObjectNode(const Value *val, FieldType fields) {
@@ -84,6 +98,16 @@ NodeIndex AndersNodeFactory::createReturnNode(const llvm::Function *f) {
   unsigned nextIdx = nodes.size();
   nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, f));
   returnMap[f] = nextIdx;
+
+  // If f (fields={}) doesn't exist in valuenodemap, we add it.
+  // This is only because this return node is mostly symbolic
+  // and isn't indicative of the actual function, nor is it an actual SSA value on its own.
+  if (!valueNodeMap.contains(f, {}))
+    valueNodeMap.insert(f, {}, nextIdx);
+
+  // These are a bit special since they can return aggregate ptrs:
+  // We send an explicit base type as the func's ret type, but the base is still f.
+  createDerivedValueNode(f, nextIdx, f->getReturnType());
   return nextIdx;
 }
 
@@ -125,7 +149,7 @@ const llvm::SmallVector<NodeIndex, 4>& AndersNodeFactory::getFields(NodeIndex id
 
 NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val, FieldType fields) {
   if (const Constant *c = dyn_cast<Constant>(val)) {
-    if (!isa<GlobalValue>(c))
+    if (!isa<GlobalValue>(c)) 
       return getValueNodeForConstant(c, fields);
   }
   return valueNodeMap.get(val, fields);

@@ -13,7 +13,7 @@
 #include <queue>
 
 // TODO: DNI
-static void print_field_vec(SmallVector<unsigned int, 4> &fields) {
+static void print_field_vec(const SmallVector<unsigned int, 4> &fields) {
     errs() << "Fields: [";
     for (const auto &x: fields) {
         errs() << x << " ";
@@ -73,53 +73,21 @@ void Andersen::addConstraint(AndersConstraint::ConstraintType type,
     const Value *valueB, NodeIndex idxB) {
 
     const auto createAggregateConstraints = [&](NodeIndex originalIdx, const Value* original, NodeIndex base) {
-        SmallVector<NodeIndex, 4> aggregates;
         for (const NodeIndex &idx : nodeFactory.getAggregateChildren(base)) {
             // For the case of returns, the base is still accepted and put in returnMap.
             // ..however, the "children" of that base are values..which is okay.
-            NodeIndex childIdx = nodeFactory.createValueNode(original, nodeFactory.getFields(idx));
+            NodeIndex childIdx = nodeFactory.getValueNodeFor(original, nodeFactory.getFields(idx));
+            assert(childIdx != AndersNodeFactory::InvalidIndex);
             constraints.emplace_back(type, childIdx, idx);
-            aggregates.push_back(childIdx);
         }
-        nodeFactory.registerBaseAggregate(originalIdx, aggregates);
     };
 
-    // If idxA or B is a base aggregate, the opposite then also becomes a base aggregate.
-    if (nodeFactory.isBaseAggregate(idxB)) {
-        createAggregateConstraints(idxA, valueA, idxB);
-        return;
-    }
-    else if (nodeFactory.isBaseAggregate(idxA)) {
-        createAggregateConstraints(idxB, valueB, idxA);
+    if (!nodeFactory.isBaseAggregate(idxB)) {
+        constraints.emplace_back(type, idxA, idxB);
         return;
     }
 
-    // Loads will use idxA (idx of the load's SSA value)
-    //   and have it act as a "base" value.
-    if (type == AndersConstraint::ConstraintType::LOAD) {
-        const Type *valueAType = valueA->getType();
-        if (valueAType->isAggregateType()) {
-            if (isa<GlobalValue>(valueB)) {
-                // Create new value nodes for each element:
-                SmallVector<NodeIndex, 4> aggregates;
-                for (const FieldType& fields : nodeFactory.getGlobalAggregateFields(idxB)) {
-                    NodeIndex childIdx = nodeFactory.createValueNode(valueA, fields);
-
-                    // Get the appropriate value field for the struct:
-                    NodeIndex valueBFieldIdx = nodeFactory.getValueNodeFor(valueB, fields);
-                    assert(valueBFieldIdx != AndersNodeFactory::InvalidIndex);
-
-                    // Constraint gets added only to the children.
-                    constraints.emplace_back(type, childIdx, valueBFieldIdx);
-                    aggregates.push_back(childIdx);
-                }
-                nodeFactory.registerBaseAggregate(idxA, aggregates);
-                return;
-            }
-        }
-    }
-
-    constraints.emplace_back(type, idxA, idxB);
+    createAggregateConstraints(idxA, valueA, idxB);
 }
 
 void Andersen::scanFunction(const llvm::Function *f) {
@@ -209,6 +177,15 @@ void Andersen::setupFunctionConstraints(const Function *f) {
 }
 
 void Andersen::addGlobalInitializerConstraints(NodeIndex objNode, const Constant *c) {
+  const auto getElementAt = [&c](FieldType& fields) -> const Constant* {
+    const Constant *cur = c;
+    for (const NodeIndex &i : fields) {
+        if (!cur) return nullptr;
+        cur = cur->getAggregateElement(i);
+    }
+    return cur;
+  };
+
   if (c->getType()->isSingleValueType()) {
     if (isa<PointerType>(c->getType())) {
       NodeIndex rhsNode = nodeFactory.getObjectNodeForConstant(c);
@@ -224,40 +201,33 @@ void Andersen::addGlobalInitializerConstraints(NodeIndex objNode, const Constant
     constraints.emplace_back(AndersConstraint::COPY, objNode,
                              nodeFactory.getNullObjectNode());
   } else if (!isa<UndefValue>(c)) {
-    // Since we are doing field-insensitive analysis, all objects in the
-    // array/struct are pointed-to by the 1st-field pointer
     assert(isa<ConstantArray>(c) || isa<ConstantDataSequential>(c) ||
            isa<ConstantStruct>(c));
 
-    FieldType fields;
-    addGlobalAggregateConstraints(nodeFactory.getValueForNode(objNode), c, fields);
+    const Value *aggregate = nodeFactory.getValueForNode(objNode);
+    NodeIndex baseIdx = nodeFactory.getValueNodeFor(aggregate);
+    nodeFactory.createDerivedValueNode(c, nodeFactory.getValueNodeFor(aggregate));
 
-  }
-}
+    // Since this is still apart of globals, they get their own abstract object:
+    for (const NodeIndex &x : nodeFactory.getAggregateChildren(baseIdx)) {
+        FieldType fields = nodeFactory.getFields(x);
+        NodeIndex objIdx = nodeFactory.getObjectNodeFor(aggregate, fields);
 
-void Andersen::addGlobalAggregateConstraints(const llvm::Value *aggregate, const llvm::Constant *c, FieldType &fields) {
-  for (unsigned int i=0; i < c->getNumOperands(); i++) {
-    Constant *element = cast<Constant>(c->getOperand(i));
-    FieldType newFields;
-    newFields.append(fields);
-    newFields.push_back(i);
+        if (objIdx == AndersNodeFactory::InvalidIndex) {
+            // We still do V = &O for the global
+            objIdx = nodeFactory.createObjectNode(aggregate, fields);
+            constraints.emplace_back(AndersConstraint::ADDR_OF, x, objIdx);
+        }
 
-    if (element->getType()->isAggregateType()) {
-      addGlobalAggregateConstraints(aggregate, element, newFields);
-      continue;
+        // ..if fields is empty, we say fields={0} just for getElementAt.
+        if (fields.empty())
+            fields.push_back(0);
+
+        // ..and since this is a constant global, we do O = &O(element)
+        const Constant *element = getElementAt(fields);
+        assert(element != nullptr);
+        addGlobalInitializerConstraints(objIdx, element);
     }
-
-    NodeIndex objIdx = nodeFactory.getObjectNodeFor(aggregate, newFields);
-    if (objIdx == AndersNodeFactory::InvalidIndex) {
-      NodeIndex valIdx = nodeFactory.createValueNode(aggregate, newFields);
-      objIdx = nodeFactory.createObjectNode(aggregate, newFields);
-      constraints.emplace_back(AndersConstraint::ADDR_OF, valIdx, objIdx);
-    }
-
-    NodeIndex baseValIdx = nodeFactory.getValueNodeFor(aggregate);
-    nodeFactory.insertGlobalAggregateFields(baseValIdx, newFields);
-
-    addGlobalInitializerConstraints(objIdx, element);
   }
 }
 
@@ -520,13 +490,19 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
     NodeIndex srcIndex = nodeFactory.getValueNodeFor(aggOp);
     assert(srcIndex != AndersNodeFactory::InvalidIndex);
 
-    SmallVector<NodeIndex, 4> children;
-
-    // This sort of does what addConstraint would've done, but geared specifically toward EVs.
+    // We handle constraints here rather than use addConstraint:
+    // ..only because we are looking for children where the first n indices match.
+    bool addedConstraint = false;
+    NodeIndex candidate = AndersNodeFactory::InvalidIndex;
     for (const auto &x : nodeFactory.getAggregateChildren(srcIndex)) {
-        // We're looking for where the first n indices (n=len(indices)) match.
         auto fields = nodeFactory.getFields(x);
-        if (fields.size() < indices.size()) continue;
+        if (fields.size() < indices.size()) {
+            // It's possible that we're looking for i=0. In that case, fields={}.
+            // However, that's ONLY if we never resolve a constraint here.
+            if (indices.size() == 1 && indices[0] == 0 && fields.empty())
+                candidate = x;
+            continue;
+        }
 
         auto slice = SmallVector<unsigned int, 4>{fields.begin(), fields.begin() + indices.size()};
         if (slice != indices) continue;
@@ -537,16 +513,26 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
         if (remainder.empty()) {
             // Constraint is directly added: dstIndex = x.
             constraints.emplace_back(AndersConstraint::COPY, dstIndex, x);
+            addedConstraint = true;
             break;
         }
 
-        // ..or there IS a remainder and we "clone" the children and this becomes a base aggregate.
-        NodeIndex childIdx = nodeFactory.createValueNode(inst, remainder);
+        // If the remainder is just [0], then we keep the remainder as empty.
+        // See: NodeFactory::createDerivedValueNode
+        if (remainder.size() == 1 && remainder[0] == 0)
+            remainder = {};
+
+        // ..or if there IS a remainder (nested extractvalues), then this is a base aggregate.
+        NodeIndex childIdx = nodeFactory.getValueNodeFor(inst, remainder);
+        assert(childIdx != AndersNodeFactory::InvalidIndex);
         constraints.emplace_back(AndersConstraint::COPY, childIdx, x);
-        children.push_back(childIdx);
+        addedConstraint = true;
     }
 
-    nodeFactory.registerBaseAggregate(dstIndex, children);
+    // If we never added a constraint, and we have a candidate, we use the candidate.
+    if (!addedConstraint && candidate != AndersNodeFactory::InvalidIndex)
+        constraints.emplace_back(AndersConstraint::COPY, dstIndex, candidate);
+
     break;
   }
   case Instruction::InsertValue: {
