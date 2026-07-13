@@ -171,7 +171,7 @@ void Andersen::setupFunctionConstraints(const Function *f) {
   // Add nodes for all formal arguments.
   for (Function::const_arg_iterator itr = f->arg_begin(), ite = f->arg_end();
        itr != ite; ++itr) {
-    if (isa<PointerType>(itr->getType()))
+    if (typeContainsPointer(itr->getType()))
       nodeFactory.createValueNode(&*itr);
   }
 }
@@ -537,21 +537,33 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
   }
   case Instruction::InsertValue: {
       if (!typeContainsPointer(inst->getType())) break;
-      NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst);
-      if (dstIndex == AndersNodeFactory::InvalidIndex) break;
 
       const InsertValueInst *ivi = cast<InsertValueInst>(inst);
       const Value *insertedVal = ivi->getInsertedValueOperand();
       const Value *aggOp = ivi->getAggregateOperand();
-      if (insertedVal->getType()->isPointerTy() && !isa<Constant>(insertedVal)) {
-          NodeIndex srcIndex = nodeFactory.getValueNodeFor(insertedVal);
-          if (srcIndex != AndersNodeFactory::InvalidIndex)
-              constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex);
-      }
+
+      SmallVector<unsigned int, 4> indices = {ivi->indices().begin(), ivi->indices().end()};
+      // if indices = {0} -> {} to stay consistent with how we do everything else.
+      if (indices.size() == 1 && indices[0] == 0)
+        indices = {};
+
+      // For insertvalue, chaining is possible..but not in the way extractvalue is.
+      // ..you must provide an explicit set of indices to put something in an inner field.
+      // So this is fine..and addConstraint will handle the rest:
+      NodeIndex specificDstIndex = nodeFactory.getValueNodeFor(inst, indices);
+      if (specificDstIndex == AndersNodeFactory::InvalidIndex) break;
+
+      // For a poison agg, this will still create the derived value for the fields.
+      // ..this is only to appease the case of phi nodes.
+      NodeIndex srcIndex = nodeFactory.getValueNodeFor(insertedVal);
+      addConstraint(AndersConstraint::COPY, inst, specificDstIndex, insertedVal, srcIndex);
+
+      // For insertvalue, the retval is actually the new value of the aggregate.
+      // ..meaning the aggregate operand, if not poison, needs to copy.
       if (!isa<Constant>(aggOp) && typeContainsPointer(aggOp->getType())) {
-          NodeIndex aggIndex = nodeFactory.getValueNodeFor(aggOp);
-          if (aggIndex != AndersNodeFactory::InvalidIndex)
-              constraints.emplace_back(AndersConstraint::COPY, dstIndex, aggIndex);
+        NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst);
+        NodeIndex aggIndex = nodeFactory.getValueNodeFor(aggOp);
+        addConstraint(AndersConstraint::COPY, inst, dstIndex, aggOp, aggIndex);
       }
       break;
   }
@@ -605,15 +617,15 @@ void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *
     const Argument *formal = &*fItr;
     const Value *actual = *aItr;
 
-    if (formal->getType()->isPointerTy()) {
+    if (typeContainsPointer(formal->getType())) {
       NodeIndex fIndex = nodeFactory.getValueNodeFor(formal);
       assert(fIndex != AndersNodeFactory::InvalidIndex &&
              "Failed to find formal arg node!");
-      if (actual->getType()->isPointerTy()) {
+      if (typeContainsPointer(actual->getType())) {
         NodeIndex aIndex = nodeFactory.getValueNodeFor(actual);
         assert(aIndex != AndersNodeFactory::InvalidIndex &&
                "Failed to find actual arg node!");
-        constraints.emplace_back(AndersConstraint::COPY, fIndex, aIndex);
+        addConstraint(AndersConstraint::COPY, formal, fIndex, actual, aIndex);
       } else
         constraints.emplace_back(AndersConstraint::COPY, fIndex,
                                  nodeFactory.getUniversalPtrNode());
