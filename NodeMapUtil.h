@@ -241,11 +241,13 @@ namespace NodeMapUtil {
             const Type *elementType = getElementType(type, i);
 
             if (elementType->isAggregateType()) {
+                currentFields.push_back(i);
                 populateAggregateFields(elementType, currentFields, allFields);
                 continue;
             }
 
-            allFields.push_back(currentFields);
+            if (elementType->isPointerTy())
+                allFields.push_back(currentFields);
         }
     }
 
@@ -264,7 +266,7 @@ namespace NodeMapUtil {
             fields.push_back(i);
 
             // If the inner is not an agg type, this goes directly in allFields:
-            if (!innerType->isAggregateType()) {
+            if (!innerType->isAggregateType() && innerType->isPointerTy()) {
                 allFields.push_back(fields);
                 continue;
             }
