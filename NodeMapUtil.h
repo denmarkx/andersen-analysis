@@ -197,6 +197,26 @@ namespace NodeMapUtil {
     }
 
     /*
+     * Returns the number of elements within the current type.
+     * Note: This is non-recursive and only returns the top layer.
+    */
+    inline unsigned int getNumElements(const Type *type) {
+        if (type->isStructTy())
+            return type->getStructNumElements();
+        return type->getArrayNumElements();
+    }
+
+    /*
+     * Returns current element type given the index.
+     * Note: The parameter <i> is unused for arrays.
+    */
+    inline const Type* getElementType(const Type *type, unsigned int i) {
+        if (type->isStructTy())
+            return type->getStructElementType(i);
+        return type->getArrayElementType();
+    };
+
+    /*
      * Returns boolean if the first-class aggregate type (IE: struct or array) contains a pointer.
     */
     inline bool aggregateContainsPointer(const Type* type) {
@@ -213,13 +233,15 @@ namespace NodeMapUtil {
     inline void populateAggregateFields(const Type* type, const FieldType &fields, SmallVector<FieldType, 4>& allFields) {
         if (!type->isAggregateType()) return;
 
-        for (unsigned int i=0; i < type->getNumContainedTypes(); i++) {
+        for (unsigned int i=0; i < getNumElements(type); i++) {
             FieldType currentFields;
             currentFields.append(fields);
             currentFields.push_back(i);
 
-            if (type->getStructElementType(i)->isAggregateType()) {
-                populateAggregateFields(type->getStructElementType(i), currentFields, allFields);
+            const Type *elementType = getElementType(type, i);
+
+            if (elementType->isAggregateType()) {
+                populateAggregateFields(elementType, currentFields, allFields);
                 continue;
             }
 
@@ -235,21 +257,21 @@ namespace NodeMapUtil {
 
         SmallVector<FieldType, 4> allFields;
 
-        for (unsigned int i=0; i < type->getNumContainedTypes(); i++) {
+        for (unsigned int i=0; i < getNumElements(type); i++) {
+            const Type *innerType = getElementType(type, i);
+
             FieldType fields;
             fields.push_back(i);
-            const Type *innerType = type->getStructElementType(i);
+
+            // If the inner is not an agg type, this goes directly in allFields:
+            if (!innerType->isAggregateType()) {
+                allFields.push_back(fields);
+                continue;
+            }
+
             populateAggregateFields(innerType, fields, allFields);
         }
 
-        errs() << "getAggregateFields for: " << *type << "\n";
-        for (const auto &ft : allFields) {
-            errs() << "Fields = [";
-            for (const auto &x : ft) {
-                errs() << x << " ";
-            }
-            errs() << "]\n";
-        }
         return allFields;
     }
 };
