@@ -84,9 +84,10 @@ public:
     void assertPtsToExact(const Value *p, vector<const Value*> qs) {
         std::vector<const Value*> set;
         andersen->getPointsToSet(p, set);
-        REQUIRE(
+        REQUIRE((
+            set.size() == qs.size() &&
             std::is_permutation(set.begin(), set.end(), qs.begin())
-        );
+        ));
     }
 
 private:
