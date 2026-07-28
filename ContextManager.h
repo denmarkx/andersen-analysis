@@ -2,17 +2,33 @@
 #define ANDERSEN_CONTEXTMANAGER_H
 
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/DenseMap.h>
+#include <optional>
 
+typedef unsigned int NodeIndex;
 typedef unsigned int ContextType;
 inline unsigned int NoContext = 0;
 
+struct FunctionContext {
+    NodeIndex functionIdx;
+    llvm::SmallVector<NodeIndex, 4> parameterIdxs;
+};
+
 class ContextManager {
 public:
-    void registerHeapPointer(unsigned int);
-    bool isHeapObject(unsigned int);
+    void registerHeapPointer(NodeIndex);
+    bool isHeapObject(NodeIndex);
+
+    void registerFunctionContext(NodeIndex, ContextType, NodeIndex, llvm::SmallVector<NodeIndex, 4>&);
+    bool doesFunctionContextExist(NodeIndex, ContextType) const;
+    const std::optional<FunctionContext> getFunctionContext(NodeIndex, ContextType) const;
 
 private:
-    llvm::SmallVector<unsigned int> _heapPointers;
+    llvm::SmallVector<NodeIndex, 8> _heapPointers;
+
+    // _functionContextCache is {{generalFunctionIdx, objIdx}, ContextFunction}
+    //  where generalFunctionIdx is just the NodeIndex for the function where context = NoContext.
+    llvm::DenseMap<std::pair<NodeIndex, ContextType>, FunctionContext> _functionContextCache;
 };
 
 #endif

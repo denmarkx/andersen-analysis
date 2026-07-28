@@ -92,6 +92,10 @@ void Andersen::addConstraint(AndersConstraint::ConstraintType type,
 }
 
 void Andersen::scanFunction(const llvm::Function *f, const ContextType context) {
+  // If we supplied a context, we also need to collect constraints again:
+  if (context != NoContext)
+    setupFunctionConstraints(f, context);
+
   // First, create a value node for each instruction with pointer type. It is
   // necessary to do the job here rather than on-the-fly because an
   // instruction may refer to the value node defined before it (e.g. phi
@@ -148,12 +152,12 @@ void Andersen::collectConstraintsForGlobals(const Module &M) {
   }
 }
 
-void Andersen::setupFunctionConstraints(const Function *f) {
-  // If f is an addr-taken function, create a pointer and an object for it
+void Andersen::setupFunctionConstraints(const Function *f, const ContextType context) {
+  // If f is an addr-taken function, create a pointer and constraint for it
+  NodeIndex fObj = nodeFactory.createObjectNode(f, context);
   if (f->hasAddressTaken()) {
     // 创建一个值节点和一个对象节点
-    NodeIndex fVal = nodeFactory.createValueNode(f);
-    NodeIndex fObj = nodeFactory.createObjectNode(f);
+    NodeIndex fVal = nodeFactory.createValueNode(f, context);
     constraints.emplace_back(AndersConstraint::ADDR_OF, fVal, fObj);
   }
 
@@ -162,7 +166,7 @@ void Andersen::setupFunctionConstraints(const Function *f) {
   // Create return node
   const Type *retTy = f->getFunctionType()->getReturnType();
   if (retTy->isPointerTy() || typeContainsPointer(retTy)) {
-      nodeFactory.createReturnNode(f);
+      nodeFactory.createReturnNode(f, context);
   }
 
   // Create vararg node
@@ -170,10 +174,20 @@ void Andersen::setupFunctionConstraints(const Function *f) {
     nodeFactory.createVarargNode(f);
 
   // Add nodes for all formal arguments.
+  SmallVector<NodeIndex, 4> formalArgs;
   for (Function::const_arg_iterator itr = f->arg_begin(), ite = f->arg_end();
        itr != ite; ++itr) {
-    if (typeContainsPointer(itr->getType()))
-      nodeFactory.createValueNode(&*itr);
+    if (typeContainsPointer(itr->getType())) {
+      NodeIndex formalIdx = nodeFactory.createValueNode(&*itr, context);
+      formalArgs.push_back(formalIdx);
+    }
+  }
+
+  // If the context is not NoContext, this means we are rescanning.
+  if (context != NoContext) {
+    // So the "base" function idx is:
+    NodeIndex baseIdx = nodeFactory.getObjectNodeFor(f, NoContext);
+    _contextMgr.registerFunctionContext(baseIdx, context, fObj, formalArgs);
   }
 }
 
@@ -614,27 +628,56 @@ void Andersen::addReturnConstraintForCall(const CallBase *cs, const Function *f,
 void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *f, const ContextType context) {
   Function::const_arg_iterator fItr = f->arg_begin();
   CallBase::User::const_op_iterator aItr = cs->arg_begin();
+
+  // First, determine if any arguments are tracked:
+  // TODO: right now, this is only for testing 1 arg being the obj.
+  NodeIndex objIdx = AndersNodeFactory::InvalidIndex;
+  for (const auto &arg : cs->args()) {
+    NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
+    if (_contextMgr.isHeapObject(argIdx)) {
+      objIdx = argIdx;
+      break; // ..again, just for testing 1 arg.
+    }
+  }
+
+  // If we are tracking an object, we can clone:
+  std::optional<FunctionContext> functionContext = std::nullopt;
+  if (objIdx != AndersNodeFactory::InvalidIndex) {
+    NodeIndex baseFunctionIdx = nodeFactory.getObjectNodeFor(f, NoContext);
+
+    // We may not actually need to clone if this already exists:
+    if (!_contextMgr.doesFunctionContextExist(baseFunctionIdx, objIdx))
+      scanFunction(f, objIdx);
+
+    // We only need the parameter list, which should be ordered...
+    functionContext = _contextMgr.getFunctionContext(baseFunctionIdx, objIdx);
+  }
+
+  unsigned int formalItIdx = 0;
   while (fItr != f->arg_end() && aItr != cs->arg_end()) {
     const Argument *formal = &*fItr;
     const Value *actual = *aItr;
 
     if (typeContainsPointer(formal->getType())) {
-      NodeIndex fIndex = nodeFactory.getValueNodeFor(formal);
+      // Formal is either retrieved from functionContext or we just use getValueNodeFor.
+      NodeIndex fIndex = AndersNodeFactory::InvalidIndex;
+      if (functionContext != std::nullopt)
+        fIndex = functionContext->parameterIdxs[formalItIdx];
+      else
+        fIndex = nodeFactory.getValueNodeFor(formal);
       assert(fIndex != AndersNodeFactory::InvalidIndex &&
              "Failed to find formal arg node!");
+
       if (typeContainsPointer(actual->getType())) {
-        NodeIndex aIndex = nodeFactory.getValueNodeFor(actual);
+        NodeIndex aIndex = nodeFactory.getValueNodeFor(actual, context);
         assert(aIndex != AndersNodeFactory::InvalidIndex &&
                "Failed to find actual arg node!");
-        NodeIndex objIdx = nodeFactory.getObjectNodeFor(actual);
-        if (_contextMgr.isHeapObject(objIdx))
-          scanFunction(f, objIdx);
         addConstraint(AndersConstraint::COPY, formal, fIndex, actual, aIndex);
       } else
         constraints.emplace_back(AndersConstraint::COPY, fIndex,
                                  nodeFactory.getUniversalPtrNode());
     }
-
+    ++formalItIdx;
     ++fItr, ++aItr;
   }
 
