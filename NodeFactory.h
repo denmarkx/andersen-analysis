@@ -124,7 +124,7 @@ public:
   NodeIndex createObjectNode(const llvm::Value *val = nullptr, ContextType context = NoContext, FieldType fields={});
   NodeIndex createReturnNode(const llvm::Function *f, ContextType context = NoContext);
   NodeIndex createVarargNode(const llvm::Function *f);
-  void createDerivedValueNode(const llvm::Value*, ContextType context = NoContext, NodeIndex = InvalidIndex, const Type* = nullptr);
+  void createDerivedValueNode(const llvm::Value*, NodeIndex, const Type* = nullptr, ContextType context = NoContext);
 
   // Map lookup interfaces (return InvalidIndex if value not found)
   NodeIndex getValueNodeFor(const llvm::Value *val, ContextType context = NoContext, FieldType fields={});

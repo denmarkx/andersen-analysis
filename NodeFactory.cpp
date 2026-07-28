@@ -42,7 +42,7 @@ NodeIndex AndersNodeFactory::createValueNode(const Value *val, const ContextType
   }
   nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, val, fields));
   if (!isDerived)
-    createDerivedValueNode(val, nextIdx);
+    createDerivedValueNode(val, nextIdx, nullptr, context);
   return nextIdx;
 }
 
@@ -55,7 +55,7 @@ NodeIndex AndersNodeFactory::createValueNode(const Value *val, const ContextType
  *       very little to do with GEPs, which is why this is exclusive to values only.
  *       Additionally, this is only for first-class aggregates: structs and arrays.
 */
-void AndersNodeFactory::createDerivedValueNode(const Value *base, const ContextType context, NodeIndex baseIdx, const Type* baseType) {
+void AndersNodeFactory::createDerivedValueNode(const Value *base, NodeIndex baseIdx, const Type* baseType, const ContextType context) {
   if (!base) return;
   const Type *type = (baseType != nullptr) ? baseType : base->getType();
 
@@ -107,7 +107,7 @@ NodeIndex AndersNodeFactory::createReturnNode(const llvm::Function *f, const Con
 
   // These are a bit special since they can return aggregate ptrs:
   // We send an explicit base type as the func's ret type, but the base is still f.
-  createDerivedValueNode(f, context, nextIdx, f->getReturnType());
+  createDerivedValueNode(f, nextIdx, f->getReturnType(), context);
   return nextIdx;
 }
 
