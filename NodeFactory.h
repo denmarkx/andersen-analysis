@@ -97,9 +97,9 @@ private:
 
   // returnMap - This map contains an entry for each function in the program
   // that returns a ptr.
-  llvm::DenseMap<const llvm::Function *, NodeIndex> returnMap;
+  llvm::DenseMap<std::pair<const llvm::Function *, ContextType>, NodeIndex> returnMap;
 
-  // varargMap - This map contains the entry used to represent all pointers
+  // varargMap - This map contains the entry used to represent all pointers`
   // passed through the varargs portion of a function call for a particular
   // function.  An entry is not present in this map for functions that do not
   // take variable arguments.
@@ -131,7 +131,7 @@ public:
   NodeIndex getValueNodeForConstant(const llvm::Constant *c, ContextType context = NoContext, FieldType fields={});
   NodeIndex getObjectNodeFor(const llvm::Value *val, ContextType context = NoContext, FieldType fields={}) const;
   NodeIndex getObjectNodeForConstant(const llvm::Constant *c, ContextType context = NoContext, FieldType fields={}) const;
-  NodeIndex getReturnNodeFor(const llvm::Function *f) const;
+  NodeIndex getReturnNodeFor(const llvm::Function *f, ContextType context = NoContext) const;
   NodeIndex getVarargNodeFor(const llvm::Function *f) const;
   NodeIndex getOrCreateFieldObject(NodeIndex baseObj, ContextType context = NoContext, const FieldType& fields = {});
   NodeIndex getFieldBaseObject(NodeIndex fieldObj) const;

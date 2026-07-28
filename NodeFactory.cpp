@@ -92,12 +92,12 @@ NodeIndex AndersNodeFactory::createObjectNode(const Value *val, const ContextTyp
 }
 
 NodeIndex AndersNodeFactory::createReturnNode(const llvm::Function *f, const ContextType context) {
-  auto existing = returnMap.find(f);
+  auto existing = returnMap.find({f, context});
   if (existing != returnMap.end()) return existing->second;
 
   unsigned nextIdx = nodes.size();
   nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, f));
-  returnMap[f] = nextIdx;
+  returnMap[{f, context}] = nextIdx;
 
   // If f (fields={}) doesn't exist in valuenodemap, we add it.
   // This is only because this return node is mostly symbolic
@@ -220,8 +220,8 @@ AndersNodeFactory::getObjectNodeForConstant(const llvm::Constant *c, const Conte
   return InvalidIndex;
 }
 
-NodeIndex AndersNodeFactory::getReturnNodeFor(const llvm::Function *f) const {
-  auto itr = returnMap.find(f);
+NodeIndex AndersNodeFactory::getReturnNodeFor(const llvm::Function *f, const ContextType context) const {
+  auto itr = returnMap.find({f, context});
   return itr != returnMap.end()
     ? itr->second
     : InvalidIndex;
@@ -305,7 +305,7 @@ void AndersNodeFactory::dumpNodeInfo() const {
 
   errs() << "\nReturn Map:\n";
   for (auto const &mapping : returnMap)
-    errs() << mapping.first->getName() << "  -->>  [Node #" << mapping.second
+    errs() << mapping.first.first->getName() << "  -->>  [Node #" << mapping.second
            << "]\n";
   errs() << "\nVararg Map:\n";
   for (auto const &mapping : varargMap)

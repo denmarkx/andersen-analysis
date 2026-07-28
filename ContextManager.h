@@ -2,7 +2,6 @@
 #define ANDERSEN_CONTEXTMANAGER_H
 
 #include <llvm/ADT/SmallVector.h>
-#include <llvm/IR/Value.h>
 
 typedef unsigned int ContextType;
 inline unsigned int NoContext = 0;
