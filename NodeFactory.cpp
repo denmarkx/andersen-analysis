@@ -33,12 +33,12 @@ AndersNodeFactory::AndersNodeFactory() {
   assert(nodes.size() == 4);
 }
 
-NodeIndex AndersNodeFactory::createValueNode(const Value *val, FieldType fields, bool isDerived) {
+NodeIndex AndersNodeFactory::createValueNode(const Value *val, const ContextType context, FieldType fields, bool isDerived) {
   unsigned nextIdx = nodes.size();
   if (val != nullptr) {
-    assert(!valueNodeMap.contains(val, fields) &&
+    assert(!valueNodeMap.contains(val, context, fields) &&
            "Trying to insert two mappings to valueNodeMap!");
-    valueNodeMap.insert(val, fields, nextIdx);
+    valueNodeMap.insert(val, context, fields, nextIdx);
   }
   nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, val, fields));
   if (!isDerived)
@@ -55,7 +55,7 @@ NodeIndex AndersNodeFactory::createValueNode(const Value *val, FieldType fields,
  *       very little to do with GEPs, which is why this is exclusive to values only.
  *       Additionally, this is only for first-class aggregates: structs and arrays.
 */
-void AndersNodeFactory::createDerivedValueNode(const Value *base, NodeIndex baseIdx, const Type* baseType) {
+void AndersNodeFactory::createDerivedValueNode(const Value *base, const ContextType context, NodeIndex baseIdx, const Type* baseType) {
   if (!base) return;
   const Type *type = (baseType != nullptr) ? baseType : base->getType();
 
@@ -71,7 +71,7 @@ void AndersNodeFactory::createDerivedValueNode(const Value *base, NodeIndex base
       continue;
     };
 
-    NodeIndex childIdx = createValueNode(base, fields, true);
+    NodeIndex childIdx = createValueNode(base, context, fields, true);
     childIdxs.push_back(childIdx);
   }
 
@@ -79,19 +79,19 @@ void AndersNodeFactory::createDerivedValueNode(const Value *base, NodeIndex base
   return;
 }
 
-NodeIndex AndersNodeFactory::createObjectNode(const Value *val, FieldType fields) {
+NodeIndex AndersNodeFactory::createObjectNode(const Value *val, const ContextType context, FieldType fields) {
   unsigned nextIdx = nodes.size();
   if (val != nullptr) {
-    assert(!objNodeMap.contains(val, fields) &&
+    assert(!objNodeMap.contains(val, context, fields) &&
            "Trying to insert two mappings to objNodeMap!");
-    objNodeMap.insert(val, fields, nextIdx);
+    objNodeMap.insert(val, context, fields, nextIdx);
   }
 
   nodes.push_back(AndersNode(AndersNode::OBJ_NODE, nextIdx, val, fields));
   return nextIdx;
 }
 
-NodeIndex AndersNodeFactory::createReturnNode(const llvm::Function *f) {
+NodeIndex AndersNodeFactory::createReturnNode(const llvm::Function *f, const ContextType context) {
   auto existing = returnMap.find(f);
   if (existing != returnMap.end()) return existing->second;
 
@@ -102,12 +102,12 @@ NodeIndex AndersNodeFactory::createReturnNode(const llvm::Function *f) {
   // If f (fields={}) doesn't exist in valuenodemap, we add it.
   // This is only because this return node is mostly symbolic
   // and isn't indicative of the actual function, nor is it an actual SSA value on its own.
-  if (!valueNodeMap.contains(f, {}))
-    valueNodeMap.insert(f, {}, nextIdx);
+  if (!valueNodeMap.contains(f, context, {}))
+    valueNodeMap.insert(f, context, {}, nextIdx);
 
   // These are a bit special since they can return aggregate ptrs:
   // We send an explicit base type as the func's ret type, but the base is still f.
-  createDerivedValueNode(f, nextIdx, f->getReturnType());
+  createDerivedValueNode(f, context, nextIdx, f->getReturnType());
   return nextIdx;
 }
 
@@ -140,21 +140,21 @@ const llvm::SmallVector<NodeIndex, 4>& AndersNodeFactory::getFields(NodeIndex id
   return nodes[idx].getFields();
 }
 
-NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val, FieldType fields) {
+NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val, const ContextType context, FieldType fields) {
   if (const Constant *c = dyn_cast<Constant>(val)) {
     if (!isa<GlobalValue>(c)) 
-      return getValueNodeForConstant(c, fields);
+      return getValueNodeForConstant(c, context, fields);
   }
-  return valueNodeMap.get(val, fields);
+  return valueNodeMap.get(val, context, fields);
 }
 
-NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c, FieldType fields) {
+NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c, const ContextType context, FieldType fields) {
   assert(isa<PointerType>(c->getType()) && "Not a constant pointer!");
 
   if (isa<ConstantPointerNull>(c) || isa<UndefValue>(c))
     return getNullPtrNode();
   else if (const GlobalValue *gv = dyn_cast<GlobalValue>(c))
-    return getValueNodeFor(gv, fields);
+    return getValueNodeFor(gv, context, fields);
   else if (const ConstantExpr *ce = dyn_cast<ConstantExpr>(c)) {
     switch (ce->getOpcode()) {
     // Pointer to any field within a struct is treated as a pointer to the first
@@ -164,16 +164,16 @@ NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c, Fi
       NodeIndex base = getValueNodeFor(c->getOperand(0), {});
       if (base == InvalidIndex)
           return InvalidIndex;
-      NodeIndex existing = getValueNodeFor(c->getOperand(0), fields);
+      NodeIndex existing = getValueNodeFor(c->getOperand(0), context, fields);
       if (existing != InvalidIndex)
           return existing;
-      return createValueNode(c->getOperand(0), fields);
+      return createValueNode(c->getOperand(0), context, fields);
     }
     case Instruction::IntToPtr:
     case Instruction::PtrToInt:
       return createValueNode();
     case Instruction::BitCast:
-      return getValueNodeForConstant(ce->getOperand(0), fields);
+      return getValueNodeForConstant(ce->getOperand(0), context, fields);
     default:
       errs() << "Constant Expr not yet handled: " << *ce << "\n";
       llvm_unreachable(0);
@@ -184,32 +184,32 @@ NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c, Fi
   return InvalidIndex;
 }
 
-NodeIndex AndersNodeFactory::getObjectNodeFor(const Value *val, FieldType fields) const {
+NodeIndex AndersNodeFactory::getObjectNodeFor(const Value *val, const ContextType context, FieldType fields) const {
   if (const Constant *c = dyn_cast<Constant>(val))
     if (!isa<GlobalValue>(c))
-      return getObjectNodeForConstant(c, fields);
-  return objNodeMap.get(val, fields);
+      return getObjectNodeForConstant(c, context, fields);
+  return objNodeMap.get(val, context, fields);
 }
 
 NodeIndex
-AndersNodeFactory::getObjectNodeForConstant(const llvm::Constant *c, FieldType fields) const {
+AndersNodeFactory::getObjectNodeForConstant(const llvm::Constant *c, const ContextType context, FieldType fields) const {
   assert(isa<PointerType>(c->getType()) && "Not a constant pointer!");
 
   if (isa<ConstantPointerNull>(c))
     return getNullObjectNode();
   else if (const GlobalValue *gv = dyn_cast<GlobalValue>(c))
-    return getObjectNodeFor(gv, fields);
+    return getObjectNodeFor(gv, context, fields);
   else if (const ConstantExpr *ce = dyn_cast<ConstantExpr>(c)) {
     switch (ce->getOpcode()) {
     // Pointer to any field within a struct is treated as a pointer to the first
     // field
     case Instruction::GetElementPtr:
-      return getObjectNodeForConstant(ce->getOperand(0), fields);
+      return getObjectNodeForConstant(ce->getOperand(0), context, fields);
     case Instruction::IntToPtr:
     case Instruction::PtrToInt:
       return getUniversalObjNode();
     case Instruction::BitCast:
-      return getObjectNodeForConstant(ce->getOperand(0), fields);
+      return getObjectNodeForConstant(ce->getOperand(0), context, fields);
     default:
       errs() << "Constant Expr not yet handled: " << *ce << "\n";
       llvm_unreachable(0);
@@ -324,7 +324,7 @@ void AndersNodeFactory::dumpRepInfo() const {
   errs() << "----- End of Print -----\n";
 }
 
-NodeIndex AndersNodeFactory::getOrCreateFieldObject(NodeIndex baseObj, const FieldType& fields) {
+NodeIndex AndersNodeFactory::getOrCreateFieldObject(NodeIndex baseObj, const ContextType context, const FieldType& fields) {
     // It's not necessarily an error if base is null here IF baseObj is a special index.
     if (baseObj == NullPtrIndex || baseObj == NullObjectIndex)
       return baseObj;
@@ -334,10 +334,10 @@ NodeIndex AndersNodeFactory::getOrCreateFieldObject(NodeIndex baseObj, const Fie
 
     baseObj = getMergeTarget(baseObj);
 
-    if (objNodeMap.contains(base, fields))
-      return objNodeMap.get(base, fields);
+    if (objNodeMap.contains(base, context, fields))
+      return objNodeMap.get(base, context, fields);
 
-    NodeIndex fieldObj = createObjectNode(base, fields);
+    NodeIndex fieldObj = createObjectNode(base, context, fields);
     fieldObjectBaseMap[fieldObj] = baseObj;
     return fieldObj;
 }

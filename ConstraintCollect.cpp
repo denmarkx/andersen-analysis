@@ -76,7 +76,8 @@ void Andersen::addConstraint(AndersConstraint::ConstraintType type,
         for (const NodeIndex &idx : nodeFactory.getAggregateChildren(base)) {
             // For the case of returns, the base is still accepted and put in returnMap.
             // ..however, the "children" of that base are values..which is okay.
-            NodeIndex childIdx = nodeFactory.getValueNodeFor(original, nodeFactory.getFields(idx));
+            // TODO: ctx
+            NodeIndex childIdx = nodeFactory.getValueNodeFor(original, NoContext, nodeFactory.getFields(idx));
             assert(childIdx != AndersNodeFactory::InvalidIndex);
             constraints.emplace_back(type, childIdx, idx);
         }
@@ -90,7 +91,7 @@ void Andersen::addConstraint(AndersConstraint::ConstraintType type,
     createAggregateConstraints(idxA, valueA, idxB);
 }
 
-void Andersen::scanFunction(const llvm::Function *f) {
+void Andersen::scanFunction(const llvm::Function *f, const ContextType context) {
   // First, create a value node for each instruction with pointer type. It is
   // necessary to do the job here rather than on-the-fly because an
   // instruction may refer to the value node defined before it (e.g. phi
@@ -99,14 +100,14 @@ void Andersen::scanFunction(const llvm::Function *f) {
        ++itr) {
     auto inst = &*itr.getInstructionIterator();
     if (typeContainsPointer(inst->getType()))
-        nodeFactory.createValueNode(inst);
+        nodeFactory.createValueNode(inst, context);
   }
   
   // Now, collect constraint for each relevant instruction
   for (const_inst_iterator itr = inst_begin(f), ite = inst_end(f); itr != ite;
        ++itr) {
     auto inst = &*itr.getInstructionIterator();
-    collectConstraintsForInstruction(inst);
+    collectConstraintsForInstruction(inst, context);
   }
 }
 
@@ -211,11 +212,11 @@ void Andersen::addGlobalInitializerConstraints(NodeIndex objNode, const Constant
     // Since this is still apart of globals, they get their own abstract object:
     for (const NodeIndex &x : nodeFactory.getAggregateChildren(baseIdx)) {
         FieldType fields = nodeFactory.getFields(x);
-        NodeIndex objIdx = nodeFactory.getObjectNodeFor(aggregate, fields);
+        NodeIndex objIdx = nodeFactory.getObjectNodeFor(aggregate, NoContext, fields);
 
         if (objIdx == AndersNodeFactory::InvalidIndex) {
             // We still do V = &O for the global
-            objIdx = nodeFactory.createObjectNode(aggregate, fields);
+            objIdx = nodeFactory.createObjectNode(aggregate, NoContext, fields);
             constraints.emplace_back(AndersConstraint::ADDR_OF, x, objIdx);
         }
 
@@ -235,7 +236,7 @@ void Andersen::addGlobalInitializerConstraints(NodeIndex objNode, const Constant
  * GEPs are one of those things that can be inlined (see: handleGEPExpression)
  * where the "inlined" GEP is not considered an instruction.
 */
-NodeIndex Andersen::findGEPObjectSite(const Value *v) {
+NodeIndex Andersen::findGEPObjectSite(const Value *v, const ContextType context) {
   // If this is an instruction, we just return getValueNode.
   if (const GetElementPtrInst *instr = dyn_cast<GetElementPtrInst>(v))
     return nodeFactory.getValueNodeFor(instr);
@@ -287,10 +288,10 @@ NodeIndex Andersen::findGEPObjectSite(const Value *v) {
     // Otherwise, this should be directly something we can use:
     // Since this is still a GEP operator, we have to manually supply fields.
     auto fields = NodeMapUtil::getFields(v);
-    srcIndex = nodeFactory.getValueNodeFor(source, fields);
+    srcIndex = nodeFactory.getValueNodeFor(source, context, fields);
 
     if (srcIndex == AndersNodeFactory::InvalidIndex) {
-      srcIndex = nodeFactory.createValueNode(source, fields);
+      srcIndex = nodeFactory.createValueNode(source, context, fields);
       NodeIndex objIndex = nodeFactory.getValueNodeFor(source);
       constraints.emplace_back(AndersConstraint::GEP, srcIndex, objIndex, fields);
     }
@@ -300,13 +301,13 @@ NodeIndex Andersen::findGEPObjectSite(const Value *v) {
   return srcIndex;
 }
 
-void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
+void Andersen::collectConstraintsForInstruction(const Instruction *inst, const ContextType context) {
   switch (inst->getOpcode()) {
   case Instruction::Alloca: {
-    NodeIndex valNode = nodeFactory.getValueNodeFor(inst);
+    NodeIndex valNode = nodeFactory.getValueNodeFor(inst, context);
     assert(valNode != AndersNodeFactory::InvalidIndex &&
            "Failed to find alloca value node");
-    NodeIndex objNode = nodeFactory.createObjectNode(inst);
+    NodeIndex objNode = nodeFactory.createObjectNode(inst, context);
     constraints.emplace_back(AndersConstraint::ADDR_OF, valNode, objNode);
     break;
   }
@@ -335,7 +336,7 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
   }
   case Instruction::Load: {
     if (typeContainsPointer(inst->getType())) {
-      NodeIndex opIndex = findGEPObjectSite(inst->getOperand(0));
+      NodeIndex opIndex = findGEPObjectSite(inst->getOperand(0), context);
       if (opIndex == AndersNodeFactory::InvalidIndex)
         opIndex = nodeFactory.getValueNodeFor(inst->getOperand(0));
       assert(opIndex != AndersNodeFactory::InvalidIndex &&
@@ -352,7 +353,7 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
       NodeIndex srcIndex = nodeFactory.getValueNodeFor(inst->getOperand(0));
       assert(srcIndex != AndersNodeFactory::InvalidIndex && "Failed to find store src node");
 
-      NodeIndex dstIndex = findGEPObjectSite(inst->getOperand(1));
+      NodeIndex dstIndex = findGEPObjectSite(inst->getOperand(1), context);
       if (dstIndex == AndersNodeFactory::InvalidIndex)
         dstIndex = nodeFactory.getValueNodeFor(inst->getOperand(1));
       assert(dstIndex != AndersNodeFactory::InvalidIndex && "Failed to find store dst node");
@@ -371,7 +372,7 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
 
     // If our source is a GEP, we need to resolve the alloc site.
     if (const GEPOperator *sourceInst = dyn_cast<GEPOperator>(src)) {
-      srcIndex = findGEPObjectSite(src);
+      srcIndex = findGEPObjectSite(src, context);
     }
 
     constraints.emplace_back(AndersConstraint::GEP, dstIndex, srcIndex, fields);
@@ -523,7 +524,7 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
             remainder = {};
 
         // ..or if there IS a remainder (nested extractvalues), then this is a base aggregate.
-        NodeIndex childIdx = nodeFactory.getValueNodeFor(inst, remainder);
+        NodeIndex childIdx = nodeFactory.getValueNodeFor(inst, context, remainder);
         assert(childIdx != AndersNodeFactory::InvalidIndex);
         constraints.emplace_back(AndersConstraint::COPY, childIdx, x);
         addedConstraint = true;
@@ -550,7 +551,7 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst) {
       // For insertvalue, chaining is possible..but not in the way extractvalue is.
       // ..you must provide an explicit set of indices to put something in an inner field.
       // So this is fine..and addConstraint will handle the rest:
-      NodeIndex specificDstIndex = nodeFactory.getValueNodeFor(inst, indices);
+      NodeIndex specificDstIndex = nodeFactory.getValueNodeFor(inst, context, indices);
       if (specificDstIndex == AndersNodeFactory::InvalidIndex) break;
 
       // For a poison agg, this will still create the derived value for the fields.
@@ -625,6 +626,9 @@ void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *
         NodeIndex aIndex = nodeFactory.getValueNodeFor(actual);
         assert(aIndex != AndersNodeFactory::InvalidIndex &&
                "Failed to find actual arg node!");
+        NodeIndex objIdx = nodeFactory.getObjectNodeFor(actual);
+        if (_contextMgr.isHeapObject(objIdx))
+          scanFunction(f, objIdx);
         addConstraint(AndersConstraint::COPY, formal, fIndex, actual, aIndex);
       } else
         constraints.emplace_back(AndersConstraint::COPY, fIndex,

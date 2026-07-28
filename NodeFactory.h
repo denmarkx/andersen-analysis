@@ -11,6 +11,8 @@
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Value.h"
 #include <climits>
+
+#include "ContextManager.h"
 using namespace llvm;
 
 #include <vector>
@@ -118,20 +120,20 @@ public:
   AndersNodeFactory();
 
   // Factory methods
-  NodeIndex createValueNode(const llvm::Value *val = nullptr, FieldType fields={}, bool isDerived=false);
-  NodeIndex createObjectNode(const llvm::Value *val = nullptr, FieldType fields={});
-  NodeIndex createReturnNode(const llvm::Function *f);
+  NodeIndex createValueNode(const llvm::Value *val = nullptr, ContextType context = NoContext, FieldType fields={}, bool isDerived=false);
+  NodeIndex createObjectNode(const llvm::Value *val = nullptr, ContextType context = NoContext, FieldType fields={});
+  NodeIndex createReturnNode(const llvm::Function *f, ContextType context = NoContext);
   NodeIndex createVarargNode(const llvm::Function *f);
-  void createDerivedValueNode(const llvm::Value*, NodeIndex, const Type* = nullptr);
+  void createDerivedValueNode(const llvm::Value*, ContextType context = NoContext, NodeIndex = InvalidIndex, const Type* = nullptr);
 
   // Map lookup interfaces (return InvalidIndex if value not found)
-  NodeIndex getValueNodeFor(const llvm::Value *val, FieldType fields={});
-  NodeIndex getValueNodeForConstant(const llvm::Constant *c, FieldType fields={});
-  NodeIndex getObjectNodeFor(const llvm::Value *val, FieldType fields={}) const;
-  NodeIndex getObjectNodeForConstant(const llvm::Constant *c, FieldType fields={}) const;
+  NodeIndex getValueNodeFor(const llvm::Value *val, ContextType context = NoContext, FieldType fields={});
+  NodeIndex getValueNodeForConstant(const llvm::Constant *c, ContextType context = NoContext, FieldType fields={});
+  NodeIndex getObjectNodeFor(const llvm::Value *val, ContextType context = NoContext, FieldType fields={}) const;
+  NodeIndex getObjectNodeForConstant(const llvm::Constant *c, ContextType context = NoContext, FieldType fields={}) const;
   NodeIndex getReturnNodeFor(const llvm::Function *f) const;
   NodeIndex getVarargNodeFor(const llvm::Function *f) const;
-  NodeIndex getOrCreateFieldObject(NodeIndex baseObj, const FieldType& fields);
+  NodeIndex getOrCreateFieldObject(NodeIndex baseObj, ContextType context = NoContext, const FieldType& fields = {});
   NodeIndex getFieldBaseObject(NodeIndex fieldObj) const;
 
   // Aggregate-related functions:

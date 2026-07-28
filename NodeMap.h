@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ContextManager.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/ADT/DenseMap.h"
 using namespace llvm;
@@ -12,10 +13,10 @@ public:
     using NodeMapType = DenseMap<uint64_t, NodeIndex>;
 
 public:
-    void insert(const llvm::Value *, FieldType, NodeIndex);
-    NodeIndex get(const llvm::Value *, FieldType) const;
-    bool contains(const llvm::Value *, FieldType) const;
-    void erase(const llvm::Value *);
+    void insert(const llvm::Value *, ContextType context = NoContext, FieldType = {}, NodeIndex = ~0u);
+    NodeIndex get(const llvm::Value *, ContextType context = NoContext, FieldType = {}) const;
+    bool contains(const llvm::Value *, ContextType context = NoContext, FieldType = {}) const;
+    void erase(const llvm::Value *, ContextType context = NoContext);
 
     const unsigned int size() const;
     NodeMapType::const_iterator begin() const;
@@ -23,7 +24,7 @@ public:
 
 private:
     static constexpr unsigned int InvalidIndex = ~0u;
-    uint64_t hash(const llvm::Value*, FieldType) const;
+    uint64_t hash(const llvm::Value*, ContextType, FieldType) const;
 
     NodeMapType _map;
 };

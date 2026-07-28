@@ -49,18 +49,15 @@
 #include "NodeFactory.h"
 #include "NodeMap.h"
 #include "PtsSet.h"
+#include "ContextManager.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/IR/DataLayout.h"
-#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/Pass.h"
 
 #include <vector>
-#include <map>
 
 typedef std::vector<const llvm::Value *> PtsSetType;
 
@@ -72,6 +69,9 @@ private:
   // Constraints - This vector contains a list of all of the constraints
   // identified by the program.
   std::vector<AndersConstraint> constraints;
+
+  // Context
+  ContextManager _contextMgr;
 
   llvm::DenseSet<const llvm::Function*> _setupFunctions;
   llvm::DenseSet<const llvm::Function*> _scannedFunctions;
@@ -86,17 +86,17 @@ private:
 
   // Helper functions for constraint collection
   void collectConstraintsForGlobals(const llvm::Module &);
-  void collectConstraintsForInstruction(const llvm::Instruction *);
+  void collectConstraintsForInstruction(const llvm::Instruction *, ContextType context = NoContext);
   void addGlobalInitializerConstraints(NodeIndex, const llvm::Constant *);
   void addConstraintForCall(const llvm::CallBase* cs);
   bool addConstraintForExternalLibrary(const llvm::CallBase* cs, const llvm::Function *f);
   void addArgumentConstraintForCall(const llvm::CallBase* cs, const llvm::Function *f);
   void addReturnConstraintForCall(const llvm::CallBase* cs, const llvm::Function *f);
-  void scanFunction(const llvm::Function *f);
+  void scanFunction(const llvm::Function *f, ContextType context = NoContext);
   void setupFunctionConstraints(const llvm::Function *f);
   void addConstraint(AndersConstraint::ConstraintType, const Value*, NodeIndex, const Value*, NodeIndex);
   
-  NodeIndex findGEPObjectSite(const llvm::Value*);
+  NodeIndex findGEPObjectSite(const llvm::Value*, ContextType context);
 
   // Helper functions for constraint optimization
   NodeIndex getRefNodeIndex(NodeIndex n) const;
