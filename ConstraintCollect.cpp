@@ -595,7 +595,7 @@ void Andersen::addConstraintForCall(const CallBase* cs, const ContextType contex
   if (const Function *f = cs->getCalledFunction()) { // Direct call
     if (f->isDeclaration() || f->isIntrinsic()) { // External library call
       // Handle libraries separately
-      if (addConstraintForExternalLibrary(cs, f))
+      if (addConstraintForExternalLibrary(cs, f, context))
         return;
 
       if (cs->getFunctionType()->isPointerTy()) {
