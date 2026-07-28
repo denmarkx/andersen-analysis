@@ -69,15 +69,14 @@ static bool typeContainsPointer(const Type *t) {
  * Adds a constraint from idxA to idxB of the given aggregate type for all items.
 */
 void Andersen::addConstraint(AndersConstraint::ConstraintType type,
-    const Value *valueA, NodeIndex idxA,
-    const Value *valueB, NodeIndex idxB) {
+    const Value *valueA, NodeIndex idxA, NodeIndex idxB, const ContextType contextA) {
 
-    const auto createAggregateConstraints = [&](NodeIndex originalIdx, const Value* original, NodeIndex base) {
+    const auto createAggregateConstraints = [&](const Value* original, NodeIndex base) {
         for (const NodeIndex &idx : nodeFactory.getAggregateChildren(base)) {
             // For the case of returns, the base is still accepted and put in returnMap.
             // ..however, the "children" of that base are values..which is okay.
             // TODO: ctx
-            NodeIndex childIdx = nodeFactory.getValueNodeFor(original, NoContext, nodeFactory.getFields(idx));
+            NodeIndex childIdx = nodeFactory.getValueNodeFor(original, contextA, nodeFactory.getFields(idx));
             assert(childIdx != AndersNodeFactory::InvalidIndex);
             constraints.emplace_back(type, childIdx, idx);
         }
@@ -88,7 +87,7 @@ void Andersen::addConstraint(AndersConstraint::ConstraintType type,
         return;
     }
 
-    createAggregateConstraints(idxA, valueA, idxB);
+    createAggregateConstraints(valueA, idxB);
 }
 
 void Andersen::scanFunction(const llvm::Function *f, const ContextType context) {
@@ -345,7 +344,7 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst, const C
       NodeIndex valIndex = nodeFactory.getValueNodeFor(inst->getOperand(0), context);
       if (valIndex == AndersNodeFactory::InvalidIndex) break;
 
-      addConstraint(AndersConstraint::COPY, function, retIndex, inst->getOperand(0), valIndex);
+      addConstraint(AndersConstraint::COPY, function, retIndex, valIndex, context);
       break;
   }
   case Instruction::Load: {
@@ -358,7 +357,7 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst, const C
       NodeIndex valIndex = nodeFactory.getValueNodeFor(inst, context);
       assert(valIndex != AndersNodeFactory::InvalidIndex &&
              "Failed to find load value node");
-      addConstraint(AndersConstraint::LOAD, inst, valIndex, inst->getOperand(0), opIndex);
+      addConstraint(AndersConstraint::LOAD, inst, valIndex, opIndex, context);
     }
     break;
   }
@@ -481,7 +480,7 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst, const C
   }
   case Instruction::VAArg: {
     if (inst->getType()->isPointerTy()) {
-      NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst);
+      NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst, context);
       assert(dstIndex != AndersNodeFactory::InvalidIndex &&
              "Failed to find va_arg dst node");
       NodeIndex vaIndex =
@@ -570,15 +569,15 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst, const C
 
       // For a poison agg, this will still create the derived value for the fields.
       // ..this is only to appease the case of phi nodes.
-      NodeIndex srcIndex = nodeFactory.getValueNodeFor(insertedVal);
-      addConstraint(AndersConstraint::COPY, inst, specificDstIndex, insertedVal, srcIndex);
+      NodeIndex srcIndex = nodeFactory.getValueNodeFor(insertedVal, context);
+      addConstraint(AndersConstraint::COPY, inst, specificDstIndex, srcIndex, context);
 
       // For insertvalue, the retval is actually the new value of the aggregate.
       // ..meaning the aggregate operand, if not poison, needs to copy.
       if (!isa<Constant>(aggOp) && typeContainsPointer(aggOp->getType())) {
         NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst, context);
         NodeIndex aggIndex = nodeFactory.getValueNodeFor(aggOp, context);
-        addConstraint(AndersConstraint::COPY, inst, dstIndex, aggOp, aggIndex);
+        addConstraint(AndersConstraint::COPY, inst, dstIndex, aggIndex, context);
       }
       break;
   }
@@ -620,7 +619,7 @@ void Andersen::addReturnConstraintForCall(const CallBase *cs, const Function *f,
       if (retIndex != AndersNodeFactory::InvalidIndex) {
           NodeIndex fRetIndex = nodeFactory.getReturnNodeFor(f, context);
           if (fRetIndex != AndersNodeFactory::InvalidIndex)
-              addConstraint(AndersConstraint::COPY, cs, retIndex, f, fRetIndex);
+              addConstraint(AndersConstraint::COPY, cs, retIndex, fRetIndex, context);
       }
   }
 }
@@ -672,7 +671,8 @@ void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *
         NodeIndex aIndex = nodeFactory.getValueNodeFor(actual, context);
         assert(aIndex != AndersNodeFactory::InvalidIndex &&
                "Failed to find actual arg node!");
-        addConstraint(AndersConstraint::COPY, formal, fIndex, actual, aIndex);
+        addConstraint(AndersConstraint::COPY, formal, fIndex, aIndex,
+          objIdx != AndersNodeFactory::InvalidIndex ? objIdx : NoContext);
       } else
         constraints.emplace_back(AndersConstraint::COPY, fIndex,
                                  nodeFactory.getUniversalPtrNode());
