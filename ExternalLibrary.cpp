@@ -159,7 +159,7 @@ bool Andersen::addConstraintForExternalLibrary(const CallBase *cs, const Functio
     NodeIndex objIndex = nodeFactory.createObjectNode(inst, context);
     NodeIndex ptrIndex = nodeFactory.getValueNodeFor(inst, context);
     constraints.emplace_back(AndersConstraint::ADDR_OF, ptrIndex, objIndex);
-    _contextMgr.registerHeapPointer(objIndex);
+    _contextMgr.registerContextObject(objIndex);
     return true;
   }
 

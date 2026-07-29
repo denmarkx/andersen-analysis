@@ -224,3 +224,55 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Field_Sensitive_Nested") {
     assertPtsToExact(load, {x}, ptrA);
     assertPtsToExact(load, {y}, ptrB);
 }
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Rust_Clone") {
+    parseAssembly(R"(
+        ; taken from Arc<T>::clone
+        define internal ptr @Clone(ptr align 8 %self) {
+            start:
+              %0 = alloca i64, align 8
+              %_0 = alloca ptr, align 8
+              %self1 = load ptr, ptr %self, align 8
+              %1 = atomicrmw add ptr %self1, i64 1 monotonic, align 8
+              store i64 %1, ptr %0, align 8
+              %old_size = load i64, ptr %0, align 8
+              %_4 = icmp ugt i64 %old_size, 9223372036854775807
+              br label %bb1
+
+            bb1:
+              %ptr = load ptr, ptr %self, align 8
+              %_8 = getelementptr i8, ptr %self, i64 8
+              store ptr %ptr, ptr %_0, align 8
+              %2 = load ptr, ptr %_0, align 8
+              ret ptr %2
+            }
+
+        define void @main() {
+            %ptr = call ptr @New(ptr null)
+            %x = alloca ptr, align 8
+            store ptr %ptr, ptr %x
+
+            %y = call ptr @Clone(ptr %x)
+
+            %ptr2 = call ptr @New(ptr null)
+            %z = alloca ptr, align 8
+            store ptr %ptr2, ptr %z
+
+            %w = call ptr @Clone(ptr %z)
+            ret void
+        }
+
+        declare ptr @New(ptr align 4) unnamed_addr #0
+
+        attributes #0 = { inlinehint nonlazybind allockind("alloc") uwtable }
+    )");
+
+    const llvm::Value *ptr = findInstruction("main", "ptr");
+    const llvm::Value *y = findInstruction("main", "y");
+
+    const llvm::Value *ptr2 = findInstruction("main", "ptr2");
+    const llvm::Value *w = findInstruction("main", "w");
+
+    assertPtsToExact(y, {ptr});
+    assertPtsToExact(w, {ptr2});
+}

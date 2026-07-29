@@ -1,5 +1,6 @@
 #include "Andersen.h"
 #include "Constraint.h"
+#include "ContextManager.h"
 #include "NodeFactory.h"
 #include "NodeMapUtil.h"
 
@@ -118,7 +119,7 @@ void Andersen::collectConstraintsForGlobals(const Module &M) {
   for (auto const &globalVal : M.globals()) {
     NodeIndex gVal = nodeFactory.createValueNode(&globalVal);
     NodeIndex gObj = nodeFactory.createObjectNode(&globalVal);
-    _contextMgr.registerHeapPointer(gObj);
+    _contextMgr.registerContextObject(gObj);
     constraints.emplace_back(AndersConstraint::ADDR_OF, gVal, gObj);
   }
 
@@ -322,6 +323,13 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst, const C
            "Failed to find alloca value node");
     NodeIndex objNode = nodeFactory.createObjectNode(inst, context);
     constraints.emplace_back(AndersConstraint::ADDR_OF, valNode, objNode);
+
+    // TODO: this is a bit of concern because we sort of dont wanna always clone if we don't have to.
+    //   so we need some way to know if this will actually be a heap/global ptr in here..
+    //   ...but that wouldn't be possible to always know!! and sometimes the walkback from a ptr 
+    //   to its underlying mem obj would hurt. perhaps a mapping of abstract objects and alloca objects
+    //   would help..but the cases where it DOESNT sort of need to have this created lazily.
+    _contextMgr.registerContextObject(objNode);
     break;
   }
   case Instruction::Call:
@@ -388,8 +396,8 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst, const C
       srcIndex = findGEPObjectSite(src, context);
     }
 
-    if (_contextMgr.isHeapObject(srcIndex))
-      _contextMgr.registerHeapPointer(dstIndex);
+    if (_contextMgr.isContextObject(srcIndex))
+      _contextMgr.registerContextObject(dstIndex);
 
     constraints.emplace_back(AndersConstraint::GEP, dstIndex, srcIndex, fields);
     break;
@@ -609,8 +617,8 @@ void Andersen::addConstraintForCall(const CallBase* cs, const ContextType contex
         constraints.emplace_back(AndersConstraint::ADDR_OF, retIndex, fObj);
       }
     } else { // Non-external function call
-      addReturnConstraintForCall(cs, f, context);
       addArgumentConstraintForCall(cs, f, context);
+      addReturnConstraintForCall(cs, f, context);
     }
   }
 }
@@ -620,7 +628,18 @@ void Andersen::addReturnConstraintForCall(const CallBase *cs, const Function *f,
   if (retTy->isPointerTy() || typeContainsPointer(retTy)) {
       NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, context);
       if (retIndex != AndersNodeFactory::InvalidIndex) {
-          NodeIndex fRetIndex = nodeFactory.getReturnNodeFor(f, context);
+          // TODO: better to put this somewhere in contextmgr since its shared with addArgumentConstraintForCall
+          // TODO: only testing 1 arg
+          // The context for the return node is actually the object in the cs args if any
+          NodeIndex objIdx = NoContext;
+          for (const auto &arg : cs->args()) {
+            NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
+            if (_contextMgr.isContextObject(argIdx)) {
+              objIdx = argIdx;
+              break;
+            }
+          }
+          NodeIndex fRetIndex = nodeFactory.getReturnNodeFor(f, objIdx);
           if (fRetIndex != AndersNodeFactory::InvalidIndex)
               addConstraint(AndersConstraint::COPY, cs, retIndex, fRetIndex, context);
       }
@@ -640,7 +659,7 @@ void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *
     // TODO: right now, this is only for testing 1 arg being the obj.
     for (const auto &arg : cs->args()) {
       NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
-      if (_contextMgr.isHeapObject(argIdx)) {
+      if (_contextMgr.isContextObject(argIdx)) {
         objIdx = argIdx;
         break; // ..again, just for testing 1 arg.
       }

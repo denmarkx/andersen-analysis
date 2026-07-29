@@ -1,12 +1,12 @@
 #include "ContextManager.h"
 
-void ContextManager::registerHeapPointer(NodeIndex objectId) {
-    assert(objectId != ~0u && "registerHeapPointer: objectId is an invalid index.");
-    _heapPointers.push_back(objectId);
+void ContextManager::registerContextObject(NodeIndex objectId) {
+    assert(objectId != ~0u && "registerContextObject: objectId is an invalid index.");
+    _contextObjects.push_back(objectId);
 }
 
-bool ContextManager::isHeapObject(NodeIndex objectId) {
-    return std::find(_heapPointers.begin(), _heapPointers.end(), objectId) != _heapPointers.end();
+bool ContextManager::isContextObject(NodeIndex objectId) {
+    return std::find(_contextObjects.begin(), _contextObjects.end(), objectId) != _contextObjects.end();
 }
 
 void ContextManager::registerFunctionContext(NodeIndex baseFunctionIdx, ContextType context,
