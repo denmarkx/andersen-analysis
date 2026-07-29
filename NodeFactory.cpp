@@ -40,7 +40,7 @@ NodeIndex AndersNodeFactory::createValueNode(const Value *val, const ContextType
            "Trying to insert two mappings to valueNodeMap!");
     valueNodeMap.insert(val, context, fields, nextIdx);
   }
-  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, val, fields));
+  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, val, fields, context));
   if (!isDerived)
     createDerivedValueNode(val, nextIdx, nullptr, context);
   return nextIdx;
@@ -87,7 +87,7 @@ NodeIndex AndersNodeFactory::createObjectNode(const Value *val, const ContextTyp
     objNodeMap.insert(val, context, fields, nextIdx);
   }
 
-  nodes.push_back(AndersNode(AndersNode::OBJ_NODE, nextIdx, val, fields));
+  nodes.push_back(AndersNode(AndersNode::OBJ_NODE, nextIdx, val, fields, context));
   return nextIdx;
 }
 
@@ -96,7 +96,7 @@ NodeIndex AndersNodeFactory::createReturnNode(const llvm::Function *f, const Con
   if (existing != returnMap.end()) return existing->second;
 
   unsigned nextIdx = nodes.size();
-  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, f));
+  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, f, {}, context));
   returnMap[{f, context}] = nextIdx;
 
   // If f (fields={}) doesn't exist in valuenodemap, we add it.
@@ -283,6 +283,8 @@ void AndersNodeFactory::dumpNode(NodeIndex idx) const {
     errs() << ", Fields: ";
     n.printFields();
   }
+  if (n.getContext() != NoContext)
+    errs() << ", Context: " << n.getContext();
   errs() << "]";
 }
 

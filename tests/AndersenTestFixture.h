@@ -57,6 +57,11 @@ public:
         return findInstruction(findFunction(functionName), name);
     }
 
+    const Value* findParameter(const string &functionName, const unsigned int idx) {
+        const Function *function = findFunction(functionName);
+        return function->getArg(idx);
+    }
+
     const GlobalVariable* findGlobal(const string &name) {
         return module->getGlobalVariable(name);
     }

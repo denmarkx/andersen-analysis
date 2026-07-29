@@ -75,7 +75,6 @@ void Andersen::addConstraint(AndersConstraint::ConstraintType type,
         for (const NodeIndex &idx : nodeFactory.getAggregateChildren(base)) {
             // For the case of returns, the base is still accepted and put in returnMap.
             // ..however, the "children" of that base are values..which is okay.
-            // TODO: ctx
             NodeIndex childIdx = nodeFactory.getValueNodeFor(original, contextA, nodeFactory.getFields(idx));
             assert(childIdx != AndersNodeFactory::InvalidIndex);
             constraints.emplace_back(type, childIdx, idx);
@@ -119,6 +118,7 @@ void Andersen::collectConstraintsForGlobals(const Module &M) {
   for (auto const &globalVal : M.globals()) {
     NodeIndex gVal = nodeFactory.createValueNode(&globalVal);
     NodeIndex gObj = nodeFactory.createObjectNode(&globalVal);
+    _contextMgr.registerHeapPointer(gObj);
     constraints.emplace_back(AndersConstraint::ADDR_OF, gVal, gObj);
   }
 
@@ -252,7 +252,7 @@ void Andersen::addGlobalInitializerConstraints(NodeIndex objNode, const Constant
 NodeIndex Andersen::findGEPObjectSite(const Value *v, const ContextType context) {
   // If this is an instruction, we just return getValueNode.
   if (const GetElementPtrInst *instr = dyn_cast<GetElementPtrInst>(v))
-    return nodeFactory.getValueNodeFor(instr);
+    return nodeFactory.getValueNodeFor(instr, context);
 
   const GEPOperator *gep = dyn_cast<GEPOperator>(v);
   if (!gep) return AndersNodeFactory::InvalidIndex;
@@ -305,7 +305,7 @@ NodeIndex Andersen::findGEPObjectSite(const Value *v, const ContextType context)
 
     if (srcIndex == AndersNodeFactory::InvalidIndex) {
       srcIndex = nodeFactory.createValueNode(source, context, fields);
-      NodeIndex objIndex = nodeFactory.getValueNodeFor(source);
+      NodeIndex objIndex = nodeFactory.getValueNodeFor(source, context);
       constraints.emplace_back(AndersConstraint::GEP, srcIndex, objIndex, fields);
     }
 
@@ -387,6 +387,9 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst, const C
     if (const GEPOperator *sourceInst = dyn_cast<GEPOperator>(src)) {
       srcIndex = findGEPObjectSite(src, context);
     }
+
+    if (_contextMgr.isHeapObject(srcIndex))
+      _contextMgr.registerHeapPointer(dstIndex);
 
     constraints.emplace_back(AndersConstraint::GEP, dstIndex, srcIndex, fields);
     break;

@@ -1,6 +1,6 @@
 #include "AndersenTestFixture.h"
 
-TEST_CASE_FIXTURE(AndersenTestFixture, "Context_Object_Sensitivity_Simple") {
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Simple") {
     parseAssembly(R"(
         define void @F1(ptr %ptr) {
             %load = load ptr, ptr %ptr
@@ -35,3 +35,101 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "Context_Object_Sensitivity_Simple") {
     assertPtsToExact(load, {first}, x);
     assertPtsToExact(load, {second}, y);
 }
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Global") {
+    parseAssembly(R"(
+        @g = global i32 0
+        @h = global i32 0
+
+        define void @F1(ptr %ptr) {
+            ret void
+        }
+
+        define void @main() {
+            call void @F1(ptr @g)
+            call void @F1(ptr @h)
+            ret void
+        }
+    )");
+
+    const Value *formalArg = findParameter("F1", 0);
+    const GlobalVariable *g = findGlobal("g");
+    const GlobalVariable *h = findGlobal("h");
+    assertPtsToExact(formalArg, {g}, g);
+    assertPtsToExact(formalArg, {h}, h);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Global_Alias") {
+    parseAssembly(R"(
+        @g = global i32 0
+        @a = alias i32, ptr @g
+
+        define void @F1(ptr %ptr) {
+            ret void
+        }
+
+        define void @main() {
+            call void @F1(ptr @g)
+            call void @F1(ptr @a)
+            ret void
+        }
+    )");
+
+    const Value *formalArg = findParameter("F1", 0);
+    const GlobalVariable *g = findGlobal("g");
+    const GlobalVariable *a = findGlobal("a");
+
+    assertPtsToExact(formalArg, {g}, g);
+    assertPtsToExact(formalArg, {g}, a);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Field_Sensitive_Simple") {
+    parseAssembly(R"(
+        %S = type { ptr, ptr }
+
+        define void @F1(ptr %ptr) {
+            %loadS = load ptr, ptr %ptr
+            %field = getelementptr inbounds %S, ptr %loadS, i32 0, i32 1
+            %load = load ptr, ptr %field
+            ret void
+        }
+
+        define void @main() {
+            %ptrA = call ptr @get()
+            %ptrB = call ptr @get()
+
+            %dataA = alloca %S
+            %dataB = alloca %S
+
+            %fieldA1 = getelementptr inbounds %S, ptr %dataA, i32 0, i32 1
+            %fieldB1 = getelementptr inbounds %S, ptr %dataB, i32 0, i32 1
+
+            %x = alloca i32
+            %y = alloca i32
+
+            store ptr %x, ptr %fieldA1
+            store ptr %y, ptr %fieldB1
+
+            store ptr %dataA, ptr %ptrA
+            store ptr %dataB, ptr %ptrB
+
+            call void @F1(ptr %ptrA)
+            call void @F1(ptr %ptrB)
+            ret void
+        }
+
+        declare ptr @get() #0
+        attributes #0 = { allockind("alloc,uninitialized,aligned") allocsize(0) }
+    )");
+
+    const Value *ptrA = findInstruction("main", "ptrA");
+    const Value *ptrB = findInstruction("main", "ptrB");
+    const Value *load = findInstruction("F1", "load");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+
+    assertPtsToExact(load, {x}, ptrA);
+    assertPtsToExact(load, {y}, ptrB);
+}
+

@@ -33,17 +33,19 @@ public:
 private:
   AndersNodeType type;
   NodeIndex idx, mergeTarget;
+  ContextType _context;
   const llvm::Value *value;
   llvm::SmallVector<unsigned int, 4> _fields;
 
 public:
   AndersNode(AndersNodeType t, unsigned i,
-    const llvm::Value *v = nullptr, llvm::SmallVector<unsigned int, 4> fields={})
-      : type(t), idx(i), mergeTarget(i), value(v), _fields(fields) {}
+    const llvm::Value *v = nullptr, llvm::SmallVector<unsigned int, 4> fields={}, ContextType context=NoContext)
+      : type(t), idx(i), mergeTarget(i), value(v), _fields(fields), _context(context) {}
 
   NodeIndex getIndex() const { return idx; }
   const llvm::Value *getValue() const { return value; }
   const llvm::SmallVector<unsigned int, 4>& getFields() const { return _fields; }
+  ContextType getContext() const { return _context; }
 
   void printFields() const {
     errs() << "[";
