@@ -1,8 +1,6 @@
 #include "Andersen.h"
 
 #include <llvm/Support/raw_ostream.h>
-#include <graphviz/gvc.h>
-#include <graphviz/cgraph.h>
 
 static bool DumpDebugInfo = false;
 static bool DumpConstraintInfo = 1;

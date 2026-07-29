@@ -13,7 +13,7 @@ void ContextManager::registerFunctionContext(NodeIndex baseFunctionIdx, ContextT
     NodeIndex functionIdx, llvm::SmallVector<NodeIndex, 4> &parameterIdxs) {
     assert(!_functionContextCache.contains({baseFunctionIdx, context}));
 
-    FunctionContext functionCtx = FunctionContext(functionIdx, parameterIdxs);
+    FunctionContext functionCtx = FunctionContext { functionIdx, parameterIdxs };
     _functionContextCache[{baseFunctionIdx, context}] = functionCtx;
 }
 

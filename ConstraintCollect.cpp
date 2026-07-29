@@ -603,6 +603,16 @@ void Andersen::addConstraintForCall(const CallBase* cs, const ContextType contex
   // Ignore asm calls.
   if (cs->isInlineAsm()) return;
 
+  // Identify the function's context if needed:
+  ContextType functionCtxId = NoContext;
+  for (const auto &arg : cs->args()) {
+    NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
+    if (_contextMgr.isContextObject(argIdx)) {
+      functionCtxId = argIdx;
+      break;
+    }
+  }  
+
   if (const Function *f = cs->getCalledFunction()) { // Direct call
     if (f->isDeclaration() || f->isIntrinsic()) { // External library call
       // Handle libraries separately
@@ -617,54 +627,31 @@ void Andersen::addConstraintForCall(const CallBase* cs, const ContextType contex
         constraints.emplace_back(AndersConstraint::ADDR_OF, retIndex, fObj);
       }
     } else { // Non-external function call
-      addArgumentConstraintForCall(cs, f, context);
-      addReturnConstraintForCall(cs, f, context);
+      addArgumentConstraintForCall(cs, f, context, functionCtxId);
+      addReturnConstraintForCall(cs, f, context, functionCtxId);
     }
   }
 }
 
-void Andersen::addReturnConstraintForCall(const CallBase *cs, const Function *f, const ContextType context) {
+void Andersen::addReturnConstraintForCall(const CallBase *cs, const Function *f, const ContextType context, const ContextType functionCtxId) {
   const Type *retTy = f->getReturnType();
   if (retTy->isPointerTy() || typeContainsPointer(retTy)) {
       NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, context);
       if (retIndex != AndersNodeFactory::InvalidIndex) {
-          // TODO: better to put this somewhere in contextmgr since its shared with addArgumentConstraintForCall
-          // TODO: only testing 1 arg
-          // The context for the return node is actually the object in the cs args if any
-          NodeIndex objIdx = NoContext;
-          for (const auto &arg : cs->args()) {
-            NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
-            if (_contextMgr.isContextObject(argIdx)) {
-              objIdx = argIdx;
-              break;
-            }
-          }
-          NodeIndex fRetIndex = nodeFactory.getReturnNodeFor(f, objIdx);
+          NodeIndex fRetIndex = nodeFactory.getReturnNodeFor(f, functionCtxId);
           if (fRetIndex != AndersNodeFactory::InvalidIndex)
               addConstraint(AndersConstraint::COPY, cs, retIndex, fRetIndex, context);
       }
   }
 }
 
-void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *f, const ContextType context) {
+void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *f, const ContextType context, const ContextType functionCtxId) {
   Function::const_arg_iterator fItr = f->arg_begin();
   CallBase::User::const_op_iterator aItr = cs->arg_begin();
 
   // If we are coming from a context, we keep it:
-  NodeIndex objIdx = context;
-
   // If we are coming from noContext, then we want to figure one out:
-  if (context == NoContext) {
-    // First, determine if any arguments are tracked:
-    // TODO: right now, this is only for testing 1 arg being the obj.
-    for (const auto &arg : cs->args()) {
-      NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
-      if (_contextMgr.isContextObject(argIdx)) {
-        objIdx = argIdx;
-        break; // ..again, just for testing 1 arg.
-      }
-    }
-  }
+  NodeIndex objIdx = (context == NoContext) ? functionCtxId : context;
 
   // If we are tracking an object, we can clone:
   std::optional<FunctionContext> functionContext = std::nullopt;
