@@ -61,29 +61,29 @@ public:
         return module->getGlobalVariable(name);
     }
 
-    void assertPtsToSetEmpty(const Value *v) {
+    void assertPtsToSetEmpty(const Value *v, const Value *contextObj = nullptr) {
         std::vector<const Value*> set;
-        andersen->getPointsToSet(v, set);
+        andersen->getPointsToSet(v, set, contextObj);
         REQUIRE(set.empty());
     }
 
-    void assertPtsToSetSize(const Value *v, size_t size) {
+    void assertPtsToSetSize(const Value *v, size_t size, const Value *contextObj = nullptr) {
         std::vector<const Value*> set;
-        andersen->getPointsToSet(v, set);
+        andersen->getPointsToSet(v, set, contextObj);
         REQUIRE(size == set.size());
     }
 
-    void assertPtsToContains(const Value *p, const Value *q) {
+    void assertPtsToContains(const Value *p, const Value *q, const Value *contextObj = nullptr) {
         std::vector<const Value*> set;
-        andersen->getPointsToSet(p, set);
+        andersen->getPointsToSet(p, set, contextObj);
         REQUIRE(
             std::find(set.begin(), set.end(), q) != set.end()
         );
     }
 
-    void assertPtsToExact(const Value *p, vector<const Value*> qs) {
+    void assertPtsToExact(const Value *p, vector<const Value*> qs, const Value *contextObj = nullptr) {
         std::vector<const Value*> set;
-        andersen->getPointsToSet(p, set);
+        andersen->getPointsToSet(p, set, contextObj);
         REQUIRE((
             set.size() == qs.size() &&
             std::is_permutation(set.begin(), set.end(), qs.begin())

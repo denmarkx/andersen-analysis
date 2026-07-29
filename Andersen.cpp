@@ -66,11 +66,11 @@ llvm::AliasResult Andersen::alias(const Value *valueA, const Value *valueB) {
  * Fills in the transitive pointsTo set for a given context.
  * This differs from getPointsToSet in the fact that the context is not the default context ID.
 */
-void Andersen::fillPointsToSet(const llvm::Value* v, PtsSetType &ptsSet) {
+void Andersen::fillPointsToSet(const llvm::Value* v, PtsSetType &ptsSet, const ContextType context) {
     if (!v->getType()->isPointerTy()) return;
 
     NodeIndex ptrTgt = nodeFactory.getMergeTarget(
-        nodeFactory.getValueNodeFor(v));
+        nodeFactory.getValueNodeFor(v, context));
     if (ptrTgt == AndersNodeFactory::InvalidIndex) return;
 
     std::unordered_set<NodeIndex> visited;
@@ -117,6 +117,20 @@ void Andersen::fillPointsToSet(const llvm::Value* v, PtsSetType &ptsSet) {
 /*
  * Places all the reachable values from the given value into the ptsSet.
 */
-void Andersen::getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet) {
-    fillPointsToSet(v, ptsSet);
+void Andersen::getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const ContextType context) {
+    fillPointsToSet(v, ptsSet, context);
+}
+
+/*
+ * Places all the reachable values from the given value into the ptsSet.
+*/
+void Andersen::getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const llvm::Value *contextObject) {
+
+    ContextType context = NoContext;
+    if (contextObject) {
+        NodeIndex objIdx = nodeFactory.getObjectNodeFor(contextObject);
+        context = objIdx != AndersNodeFactory::InvalidIndex ? objIdx : NoContext;
+    }
+
+    fillPointsToSet(v, ptsSet, context);
 }

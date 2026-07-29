@@ -102,7 +102,7 @@ private:
   NodeIndex getRefNodeIndex(NodeIndex n) const;
   NodeIndex getAdrNodeIndex(NodeIndex n) const;
 
-  void fillPointsToSet(const llvm::Value*, PtsSetType &ptsSet);
+  void fillPointsToSet(const llvm::Value*, PtsSetType &ptsSe, ContextType context = NoContext);
 
   // For debugging
   void dumpConstraint(const AndersConstraint &) const;
@@ -117,8 +117,9 @@ public:
   bool runOnModule(const llvm::Module &M);
 
   llvm::AliasResult alias(const Value*, const Value*);
-  void getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet);
-  void printPointsToSet(const llvm::Value *v);
+  void getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, ContextType context = NoContext);
+  void getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const llvm::Value *contextObject = nullptr);
+  void printPointsToSet(const llvm::Value *v, const llvm::Value *contextObject = nullptr);
 };
 
 class AndersenAAWrapperPass : public llvm::ModulePass {

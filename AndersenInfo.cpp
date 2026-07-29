@@ -36,9 +36,15 @@ bool Andersen::runOnModule(const Module &M) {
   return false;
 }
 
-void Andersen::printPointsToSet(const llvm::Value *value) {
+void Andersen::printPointsToSet(const llvm::Value *value, const llvm::Value *contextObject) {
     PtsSetType ptsSet;
-    getPointsToSet(value, ptsSet);
+    ContextType context = NoContext;
+    if (contextObject) {
+      NodeIndex objIdx = nodeFactory.getObjectNodeFor(contextObject);
+      context = objIdx != AndersNodeFactory::InvalidIndex ? objIdx : NoContext;
+    }
+
+    getPointsToSet(value, ptsSet, context);
 
     if (SilenceEmptyPtsSetInfo && ptsSet.empty()) return;
 
