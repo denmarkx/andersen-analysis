@@ -185,6 +185,7 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Simple_Interprocedural_Direct") {
         }
     )");
 
+    const Value *ptr = findInstruction("main", "ptr");
     const Value *x = findInstruction("main", "x");
     const Value *y = findInstruction("F2", "y");
 
@@ -193,11 +194,11 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Simple_Interprocedural_Direct") {
 
     assertPtsToSetSize(x, 1);
     assertPtsToSetSize(y, 1);
-    assertPtsToSetSize(loadS1, 1);
-    assertPtsToSetSize(loadS2, 1);
+    assertPtsToSetSize(loadS1, 1, ptr);
+    assertPtsToSetSize(loadS2, 1, ptr);
 
-    assertPtsToContains(loadS1, x);
-    assertPtsToContains(loadS2, y);
+    assertPtsToContains(loadS1, x, ptr);
+    assertPtsToContains(loadS2, y, ptr);
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Simple_Interprocedural_GEP_Parameter") {
