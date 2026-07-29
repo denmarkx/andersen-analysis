@@ -631,20 +631,25 @@ void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *
   Function::const_arg_iterator fItr = f->arg_begin();
   CallBase::User::const_op_iterator aItr = cs->arg_begin();
 
-  // First, determine if any arguments are tracked:
-  // TODO: right now, this is only for testing 1 arg being the obj.
-  NodeIndex objIdx = AndersNodeFactory::InvalidIndex;
-  for (const auto &arg : cs->args()) {
-    NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
-    if (_contextMgr.isHeapObject(argIdx)) {
-      objIdx = argIdx;
-      break; // ..again, just for testing 1 arg.
+  // If we are coming from a context, we keep it:
+  NodeIndex objIdx = context;
+
+  // If we are coming from noContext, then we want to figure one out:
+  if (context == NoContext) {
+    // First, determine if any arguments are tracked:
+    // TODO: right now, this is only for testing 1 arg being the obj.
+    for (const auto &arg : cs->args()) {
+      NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
+      if (_contextMgr.isHeapObject(argIdx)) {
+        objIdx = argIdx;
+        break; // ..again, just for testing 1 arg.
+      }
     }
   }
 
   // If we are tracking an object, we can clone:
   std::optional<FunctionContext> functionContext = std::nullopt;
-  if (objIdx != AndersNodeFactory::InvalidIndex) {
+  if (objIdx != NoContext) {
     NodeIndex baseFunctionIdx = nodeFactory.getObjectNodeFor(f, NoContext);
 
     // We may not actually need to clone if this already exists:
