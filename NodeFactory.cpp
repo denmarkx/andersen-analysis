@@ -1,4 +1,5 @@
 #include "NodeFactory.h"
+#include "ContextManager.h"
 #include "NodeMapUtil.h"
 #include "NodeMap.h"
 
@@ -144,8 +145,20 @@ NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val, const ContextType
   if (const Constant *c = dyn_cast<Constant>(val)) {
     if (!isa<GlobalValue>(c)) 
       return getValueNodeForConstant(c, context, fields);
+    if (isa<GlobalAlias>(c))
+      return getValueNodeForAlias(c, fields);
   }
   return valueNodeMap.get(val, context, fields);
+}
+
+NodeIndex AndersNodeFactory::getValueNodeForAlias(const llvm::Constant *c, FieldType fields) {
+  assert(isa<PointerType>(c->getType()) && "Not a constant pointer!");
+  if (const GlobalAlias *ga = dyn_cast<GlobalAlias>(c))
+    return getValueNodeForAlias(ga->getAliasee(), fields);
+  if (isa<GlobalValue>(c))
+    return getValueNodeFor(c, NoContext, fields);
+
+  return InvalidIndex;
 }
 
 NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c, const ContextType context, FieldType fields) {
@@ -185,10 +198,23 @@ NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c, co
 }
 
 NodeIndex AndersNodeFactory::getObjectNodeFor(const Value *val, const ContextType context, FieldType fields) const {
-  if (const Constant *c = dyn_cast<Constant>(val))
+  if (const Constant *c = dyn_cast<Constant>(val)) {
     if (!isa<GlobalValue>(c))
       return getObjectNodeForConstant(c, context, fields);
+    if (isa<GlobalAlias>(c))
+      return getObjectNodeForAlias(c, fields);
+  }
   return objNodeMap.get(val, context, fields);
+}
+
+NodeIndex AndersNodeFactory::getObjectNodeForAlias(const llvm::Constant *c, FieldType fields) const {
+  assert(isa<PointerType>(c->getType()) && "Not a constant pointer!");
+  if (const GlobalAlias *ga = dyn_cast<GlobalAlias>(c))
+    return getObjectNodeForAlias(ga->getAliasee(), fields);
+  if (isa<GlobalValue>(c))
+    return getObjectNodeFor(c, NoContext, fields);
+
+  return InvalidIndex;
 }
 
 NodeIndex

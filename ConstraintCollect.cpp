@@ -123,13 +123,6 @@ void Andersen::collectConstraintsForGlobals(const Module &M) {
     constraints.emplace_back(AndersConstraint::ADDR_OF, gVal, gObj);
   }
 
-  // Aliases do not create new objects. Instead, they act as p = &q.
-  for (auto const &alias : M.aliases()) {
-    NodeIndex aliasIdx = nodeFactory.createValueNode(&alias);
-    NodeIndex aliaseeIdx = nodeFactory.getObjectNodeFor(alias.getAliasee());
-    constraints.emplace_back(AndersConstraint::ADDR_OF, aliasIdx, aliaseeIdx);
-  }
-
   // Functions and function pointers are also considered global
   for (auto const &f : M) {
     setupFunctionConstraints(&f);
