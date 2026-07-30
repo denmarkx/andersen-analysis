@@ -23,8 +23,9 @@ set(ANDERSEN_FILES
     ExternalLibrary.cpp
     NodeFactory.cpp
     NodeMap.cxx
-        ContextManager.cxx
-        ContextManager.h
+    ContextManager.cxx
+    ContextManager.h
+    Summarization.cxx
 )
 
 add_library(Andersen SHARED ${ANDERSEN_FILES})

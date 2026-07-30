@@ -189,6 +189,9 @@ void Andersen::setupFunctionConstraints(const Function *f, const ContextType con
     NodeIndex baseIdx = nodeFactory.getObjectNodeFor(f, NoContext);
     _contextMgr.registerFunctionContext(baseIdx, context, fObj, formalArgs);
   }
+
+  if (context == NoContext)
+    _summarization.summarizeParameters(f, fObj);
 }
 
 void Andersen::addGlobalInitializerConstraints(NodeIndex objNode, const Constant *c) {

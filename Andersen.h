@@ -50,6 +50,7 @@
 #include "NodeMap.h"
 #include "PtsSet.h"
 #include "ContextManager.h"
+#include "Summarization.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/InstrTypes.h"
@@ -72,6 +73,7 @@ private:
 
   // Context
   ContextManager _contextMgr;
+  Summarization _summarization;
 
   llvm::DenseSet<const llvm::Function*> _setupFunctions;
   llvm::DenseSet<const llvm::Function*> _scannedFunctions;
