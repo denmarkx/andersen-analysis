@@ -23,6 +23,11 @@ void Summarization::summarizeParameters(const Function *f, unsigned int fObjIdx)
         _summaries[fObjIdx] = ParameterSummaryGroup { indices, summaries };
 }
 
+const SmallVector<unsigned, 4> Summarization::getParameterIndices(unsigned int fObjIdx) {
+    if (!_summaries.contains(fObjIdx)) return {};
+    return _summaries.find(fObjIdx)->getSecond().parameterIndices;
+}
+
 std::optional<ParameterSummary> Summarization::summarizeParameter(const Argument &arg) {
     // Ignoring if not a ptr type.
     if (!arg.getType()->isPointerTy()) return {};
@@ -54,6 +59,11 @@ std::optional<ParameterSummary> Summarization::summarizeParameter(const Argument
             .Case<llvm::StoreInst>([&](const llvm::StoreInst *inst) {
                 if (inst->getPointerOperandType())
                     summary.storesPointer = true;
+            })
+
+            .Case<llvm::CallBase>([&](const llvm::CallBase *inst) {
+                // TODO: need to check if this the param is an arg in the call and is not an indirect
+                summary.escapes = true;
             })
 
             .Default([](const llvm::Value *v) {});

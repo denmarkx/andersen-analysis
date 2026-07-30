@@ -34,12 +34,14 @@ bool Andersen::runOnModule(const Module &M) {
   return false;
 }
 
-void Andersen::printPointsToSet(const llvm::Value *value, const llvm::Value *contextObject) {
+void Andersen::printPointsToSet(const llvm::Value *value, const SmallVector<const llvm::Value*, 4> contextObjects) {
     PtsSetType ptsSet;
     ContextType context = NoContext;
-    if (contextObject) {
-      NodeIndex objIdx = nodeFactory.getObjectNodeFor(contextObject);
-      context = objIdx != AndersNodeFactory::InvalidIndex ? objIdx : NoContext;
+
+    for (const auto &v : contextObjects) {
+      NodeIndex objIdx = nodeFactory.getObjectNodeFor(v);
+      assert(objIdx != AndersNodeFactory::InvalidIndex);
+      context.push_back(objIdx);
     }
 
     getPointsToSet(value, ptsSet, context);

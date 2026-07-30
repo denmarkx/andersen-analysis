@@ -283,8 +283,10 @@ void AndersNodeFactory::dumpNode(NodeIndex idx) const {
     errs() << ", Fields: ";
     n.printFields();
   }
-  if (n.getContext() != NoContext)
-    errs() << ", Context: " << n.getContext();
+  if (n.getContext() != NoContext) {
+    errs() << ", Context: ";
+    n.printContext();
+  }
   errs() << "]";
 }
 

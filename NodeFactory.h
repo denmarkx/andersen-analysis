@@ -45,7 +45,17 @@ public:
   NodeIndex getIndex() const { return idx; }
   const llvm::Value *getValue() const { return value; }
   const llvm::SmallVector<unsigned int, 4>& getFields() const { return _fields; }
-  ContextType getContext() const { return _context; }
+  const ContextType& getContext() const { return _context; }
+
+  void printContext() const {
+    errs() << "[";
+    unsigned int ctxSize = _context.size();
+    for (unsigned int i=0; i < ctxSize-1; i++)
+      errs() << _context[i] << ", ";
+    if (ctxSize > 0)
+      errs() << _context[ctxSize-1];
+    errs() << "]";
+  }
 
   void printFields() const {
     errs() << "[";

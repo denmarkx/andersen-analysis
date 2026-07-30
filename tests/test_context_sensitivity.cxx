@@ -32,8 +32,8 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Simple") {
     const Value *x = findInstruction("main", "x");
     const Value *y = findInstruction("main", "y");
 
-    assertPtsToExact(load, {first}, x);
-    assertPtsToExact(load, {second}, y);
+    assertPtsToExact(load, {first}, {x});
+    assertPtsToExact(load, {second}, {y});
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Chain_Two") {
@@ -73,8 +73,8 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Chain_Two") {
     const Value *x = findInstruction("main", "x");
     const Value *y = findInstruction("main", "y");
 
-    assertPtsToExact(load, {first}, x);
-    assertPtsToExact(load, {second}, y);
+    assertPtsToExact(load, {first}, {x});
+    assertPtsToExact(load, {second}, {y});
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Global") {
@@ -83,6 +83,7 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Global") {
         @h = global i32 0
 
         define void @F1(ptr %ptr) {
+            %x = load ptr, ptr %ptr
             ret void
         }
 
@@ -96,8 +97,8 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Global") {
     const Value *formalArg = findParameter("F1", 0);
     const GlobalVariable *g = findGlobal("g");
     const GlobalVariable *h = findGlobal("h");
-    assertPtsToExact(formalArg, {g}, g);
-    assertPtsToExact(formalArg, {h}, h);
+    assertPtsToExact(formalArg, {g}, {g});
+    assertPtsToExact(formalArg, {h}, {h});
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Global_Alias") {
@@ -106,6 +107,7 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Global_Alias") {
         @a = alias i32, ptr @g
 
         define void @F1(ptr %ptr) {
+            %x = load ptr, ptr %ptr
             ret void
         }
 
@@ -118,10 +120,10 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Global_Alias") {
 
     const Value *formalArg = findParameter("F1", 0);
     const GlobalVariable *g = findGlobal("g");
-    const GlobalVariable *a = findGlobal("a");
+    const GlobalAlias *a = findGlobalAlias("a");
 
-    assertPtsToExact(formalArg, {g}, g);
-    assertPtsToExact(formalArg, {g}, a);
+    assertPtsToExact(formalArg, {g}, {g});
+    assertPtsToExact(formalArg, {g}, {a});
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Field_Sensitive_Simple") {
@@ -170,8 +172,8 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Field_Sensitive_Simple") {
     const Value *x = findInstruction("main", "x");
     const Value *y = findInstruction("main", "y");
 
-    assertPtsToExact(load, {x}, ptrA);
-    assertPtsToExact(load, {y}, ptrB);
+    assertPtsToExact(load, {x}, {ptrA});
+    assertPtsToExact(load, {y}, {ptrB});
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Field_Sensitive_Nested") {
@@ -221,8 +223,8 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Field_Sensitive_Nested") {
     const Value *x = findInstruction("main", "x");
     const Value *y = findInstruction("main", "y");
 
-    assertPtsToExact(load, {x}, ptrA);
-    assertPtsToExact(load, {y}, ptrB);
+    assertPtsToExact(load, {x}, {ptrA});
+    assertPtsToExact(load, {y}, {ptrB});
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Rust_Clone") {

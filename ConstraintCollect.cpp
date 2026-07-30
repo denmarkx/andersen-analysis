@@ -606,17 +606,19 @@ void Andersen::addConstraintForCall(const CallBase* cs, const ContextType contex
   // Ignore asm calls.
   if (cs->isInlineAsm()) return;
 
-  // Identify the function's context if needed:
-  ContextType functionCtxId = NoContext;
-  for (const auto &arg : cs->args()) {
-    NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
-    if (_contextMgr.isContextObject(argIdx)) {
-      functionCtxId = argIdx;
-      break;
-    }
-  }  
-
   if (const Function *f = cs->getCalledFunction()) { // Direct call
+    const NodeIndex fObjIdx = nodeFactory.getObjectNodeFor(f, NoContext);
+    auto indices = _summarization.getParameterIndices(fObjIdx);
+    ContextType functionCtx = NoContext;
+
+    // indices -> func ctx id if applicable.
+    for (const auto &i : indices) {
+      const llvm::Value *arg = cs->getArgOperand(i);
+      const NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
+      if (_contextMgr.isContextObject(argIdx))
+        functionCtx.push_back(argIdx);
+    }
+
     if (f->isDeclaration() || f->isIntrinsic()) { // External library call
       // Handle libraries separately
       if (addConstraintForExternalLibrary(cs, f, context))
@@ -630,43 +632,44 @@ void Andersen::addConstraintForCall(const CallBase* cs, const ContextType contex
         constraints.emplace_back(AndersConstraint::ADDR_OF, retIndex, fObj);
       }
     } else { // Non-external function call
-      addArgumentConstraintForCall(cs, f, context, functionCtxId);
-      addReturnConstraintForCall(cs, f, context, functionCtxId);
+      addArgumentConstraintForCall(cs, f, context, functionCtx);
+      addReturnConstraintForCall(cs, f, context, functionCtx);
     }
   }
 }
 
-void Andersen::addReturnConstraintForCall(const CallBase *cs, const Function *f, const ContextType context, const ContextType functionCtxId) {
+void Andersen::addReturnConstraintForCall(const CallBase *cs, const Function *f, const ContextType context, const ContextType functionCtx) {
   const Type *retTy = f->getReturnType();
   if (retTy->isPointerTy() || typeContainsPointer(retTy)) {
       NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, context);
       if (retIndex != AndersNodeFactory::InvalidIndex) {
-          NodeIndex fRetIndex = nodeFactory.getReturnNodeFor(f, functionCtxId);
+          NodeIndex fRetIndex = nodeFactory.getReturnNodeFor(f, functionCtx);
           if (fRetIndex != AndersNodeFactory::InvalidIndex)
               addConstraint(AndersConstraint::COPY, cs, retIndex, fRetIndex, context);
       }
   }
 }
 
-void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *f, const ContextType context, const ContextType functionCtxId) {
+void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *f, const ContextType context, const ContextType functionCtx) {
   Function::const_arg_iterator fItr = f->arg_begin();
   CallBase::User::const_op_iterator aItr = cs->arg_begin();
 
   // If we are coming from a context, we keep it:
   // If we are coming from noContext, then we want to figure one out:
-  NodeIndex objIdx = (context == NoContext) ? functionCtxId : context;
+  // NodeIndex objIdx = (context == NoContext) ? functionCtxId : context;
+  ContextType baseContext = (context == NoContext) ? functionCtx : context;
 
   // If we are tracking an object, we can clone:
   std::optional<FunctionContext> functionContext = std::nullopt;
-  if (objIdx != NoContext) {
+  if (baseContext != NoContext) {
     NodeIndex baseFunctionIdx = nodeFactory.getObjectNodeFor(f, NoContext);
 
     // We may not actually need to clone if this already exists:
-    if (!_contextMgr.doesFunctionContextExist(baseFunctionIdx, objIdx))
-      scanFunction(f, objIdx);
+    if (!_contextMgr.doesFunctionContextExist(baseFunctionIdx, baseContext))
+      scanFunction(f, baseContext);
 
     // We only need the parameter list, which should be ordered...
-    functionContext = _contextMgr.getFunctionContext(baseFunctionIdx, objIdx);
+    functionContext = _contextMgr.getFunctionContext(baseFunctionIdx, baseContext);
   }
 
   unsigned int formalItIdx = 0;
@@ -688,8 +691,7 @@ void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *
         NodeIndex aIndex = nodeFactory.getValueNodeFor(actual, context);
         assert(aIndex != AndersNodeFactory::InvalidIndex &&
                "Failed to find actual arg node!");
-        addConstraint(AndersConstraint::COPY, formal, fIndex, aIndex,
-          objIdx != AndersNodeFactory::InvalidIndex ? objIdx : NoContext);
+        addConstraint(AndersConstraint::COPY, formal, fIndex, aIndex, baseContext);
       } else
         constraints.emplace_back(AndersConstraint::COPY, fIndex,
                                  nodeFactory.getUniversalPtrNode());

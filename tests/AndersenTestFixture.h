@@ -14,6 +14,8 @@
 #include "NodeFactory.h"
 #include "PtsSet.h"
 #include "NodeMap.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/GlobalAlias.h"
 
 #include <memory>
 #include <string>
@@ -21,6 +23,8 @@
 
 using namespace std;
 using namespace llvm;
+
+typedef const llvm::SmallVector<const Value*, 4> ContextObjects;
 
 class AndersenTestFixture {
 public:
@@ -66,19 +70,23 @@ public:
         return module->getGlobalVariable(name);
     }
 
-    void assertPtsToSetEmpty(const Value *v, const Value *contextObj = nullptr) {
+    const GlobalAlias* findGlobalAlias(const string &name) {
+        return module->getNamedAlias(name);
+    }
+
+    void assertPtsToSetEmpty(const Value *v, ContextObjects contextObj = {}) {
         std::vector<const Value*> set;
         andersen->getPointsToSet(v, set, contextObj);
         REQUIRE(set.empty());
     }
 
-    void assertPtsToSetSize(const Value *v, size_t size, const Value *contextObj = nullptr) {
+    void assertPtsToSetSize(const Value *v, size_t size, ContextObjects contextObj = {}) {
         std::vector<const Value*> set;
         andersen->getPointsToSet(v, set, contextObj);
         REQUIRE(size == set.size());
     }
 
-    void assertPtsToContains(const Value *p, const Value *q, const Value *contextObj = nullptr) {
+    void assertPtsToContains(const Value *p, const Value *q, ContextObjects contextObj = {}) {
         std::vector<const Value*> set;
         andersen->getPointsToSet(p, set, contextObj);
         REQUIRE(
@@ -86,7 +94,7 @@ public:
         );
     }
 
-    void assertPtsToExact(const Value *p, vector<const Value*> qs, const Value *contextObj = nullptr) {
+    void assertPtsToExact(const Value *p, vector<const Value*> qs, ContextObjects contextObj = {}) {
         std::vector<const Value*> set;
         andersen->getPointsToSet(p, set, contextObj);
         REQUIRE((

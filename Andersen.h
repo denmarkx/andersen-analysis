@@ -120,8 +120,8 @@ public:
 
   llvm::AliasResult alias(const Value*, const Value*);
   void getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, ContextType context = NoContext);
-  void getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const llvm::Value *contextObject = nullptr);
-  void printPointsToSet(const llvm::Value *v, const llvm::Value *contextObject = nullptr);
+  void getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const SmallVector<const llvm::Value*, 4> = {});
+  void printPointsToSet(const llvm::Value *v, const SmallVector<const llvm::Value*, 4> = {});
 };
 
 class AndersenAAWrapperPass : public llvm::ModulePass {

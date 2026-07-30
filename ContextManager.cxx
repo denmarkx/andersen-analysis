@@ -25,5 +25,5 @@ const std::optional<FunctionContext> ContextManager::getFunctionContext(NodeInde
     auto it = _functionContextCache.find({baseFunctionIdx, context});
     if (it == _functionContextCache.end())
         return {};
-    return it->getSecond();
+    return it->second;
 }

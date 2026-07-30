@@ -28,6 +28,7 @@ struct ParameterSummaryGroup {
 class Summarization {
 public:
     void summarizeParameters(const Function*, unsigned int);
+    const SmallVector<unsigned, 4> getParameterIndices(unsigned int);
 
 private:
     std::optional<ParameterSummary> summarizeParameter(const Argument&);

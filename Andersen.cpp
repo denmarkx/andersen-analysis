@@ -124,12 +124,13 @@ void Andersen::getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const Co
 /*
  * Places all the reachable values from the given value into the ptsSet.
 */
-void Andersen::getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const llvm::Value *contextObject) {
+void Andersen::getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const SmallVector<const llvm::Value*, 4> contextObjects) {
 
     ContextType context = NoContext;
-    if (contextObject) {
-        NodeIndex objIdx = nodeFactory.getObjectNodeFor(contextObject);
-        context = objIdx != AndersNodeFactory::InvalidIndex ? objIdx : NoContext;
+    for (const auto &o : contextObjects) {
+        NodeIndex objIdx = nodeFactory.getObjectNodeFor(o);
+        assert(objIdx != AndersNodeFactory::InvalidIndex);
+        context.push_back(objIdx);
     }
 
     fillPointsToSet(v, ptsSet, context);
