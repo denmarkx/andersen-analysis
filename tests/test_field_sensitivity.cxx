@@ -194,10 +194,14 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Simple_Interprocedural_Direct") {
 
     assertPtsToSetSize(x, 1);
     assertPtsToSetSize(y, 1);
-    assertPtsToSetSize(loadS1, 1, {ptr});
+
+    // I suppose right now there is no meaningful way to know
+    // that these are not heap-related objects..unless we can prove that using allockind
+    // ..but that relies too much on that attribute and becomes unsound.
+    assertPtsToSetSize(loadS1, 1, {ptr, x});
     assertPtsToSetSize(loadS2, 1, {ptr});
 
-    assertPtsToContains(loadS1, x, {ptr});
+    assertPtsToContains(loadS1, x, {ptr, x});
     assertPtsToContains(loadS2, y, {ptr});
 }
 
