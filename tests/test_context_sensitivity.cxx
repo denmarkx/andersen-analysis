@@ -465,3 +465,54 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Chain_Two_Distinct_Entry") {
 
     assertPtsToExact(load, {fifth}, {xC});
 }
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Inner_Func_New_Object") {
+    parseAssembly(R"(
+        define void @F1(ptr %ptr) {
+            %new = call ptr @get()
+            %data = alloca i32
+            store ptr %data, ptr %new
+            call void @F2(ptr %ptr, ptr %new)
+            ret void
+        }
+
+        define void @F2(ptr %ptr, ptr %new) {
+            %loadA = load ptr, ptr %ptr
+            %loadB = load ptr, ptr %new
+            ret void
+        }
+
+        define void @main() {
+            %first = alloca ptr
+            %second = alloca ptr
+
+            %x = call ptr @get()
+            store ptr %first, ptr %x
+            call void @F1(ptr %x)
+
+            %y = call ptr @get()
+            store ptr %second, ptr %y
+            call void @F1(ptr %y)
+            ret void
+        }
+
+        declare ptr @get() #0
+        attributes #0 = { allockind("alloc,uninitialized,aligned") allocsize(0) }
+    )");
+
+    const Value *first = findInstruction("main", "first");
+    const Value *second = findInstruction("main", "second");
+    const Value *data = findInstruction("F1", "data");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+
+    const Value *loadA = findInstruction("F2", "loadA");
+    const Value *loadB = findInstruction("F2", "loadB");
+
+    assertPtsToExact(loadA, {first}, {x});
+    assertPtsToExact(loadB, {data}, {x});
+
+    assertPtsToExact(loadA, {second}, {y});
+    assertPtsToExact(loadB, {data}, {y});
+}
