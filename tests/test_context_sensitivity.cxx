@@ -36,6 +36,43 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Simple") {
     assertPtsToExact(load, {second}, {y});
 }
 
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Selective_Parameter_Contexts") {
+    parseAssembly(R"(
+        define void @F1(i32 %0, ptr %ptr, i32 %1) {
+            %load = load ptr, ptr %ptr
+            ret void
+        }
+
+        define void @main() {
+            %first = alloca ptr
+            %second = alloca ptr
+
+            %x = call ptr @get()
+            store ptr %first, ptr %x
+
+            %y = call ptr @get()
+            store ptr %second, ptr %y
+
+            call void @F1(i32 1, ptr %x, i32 2)
+            call void @F1(i32 3, ptr %y, i32 4)
+            ret void
+        }
+
+        declare ptr @get() #0
+        attributes #0 = { allockind("alloc,uninitialized,aligned") allocsize(0) }
+    )");
+
+    const Value *first = findInstruction("main", "first");
+    const Value *second = findInstruction("main", "second");
+
+    const Value *load = findInstruction("F1", "load");
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+
+    assertPtsToExact(load, {first}, {x});
+    assertPtsToExact(load, {second}, {y});
+}
+
 TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Chain_Two") {
     parseAssembly(R"(
         define void @F1(ptr %ptr) {
@@ -277,4 +314,81 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Rust_Clone") {
 
     assertPtsToExact(y, {ptr});
     assertPtsToExact(w, {ptr2});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Chain_Two_Distinct_Entry") {
+    parseAssembly(R"(
+        define void @F1(ptr %ptr) {
+            call void @F2(ptr %ptr)
+            ret void
+        }
+
+        define void @F2(ptr %ptrB) {
+            %load = load ptr, ptr %ptrB
+            ret void
+        }
+
+        define void @entryA() {
+            %first = alloca ptr
+            %second = alloca ptr
+
+            %x = call ptr @get()
+            store ptr %first, ptr %x
+            call void @F1(ptr %x)
+
+            %y = call ptr @get()
+            store ptr %second, ptr %y
+            call void @F1(ptr %y)
+            ret void
+        }
+
+        define void @entryB() {
+            %third = alloca ptr
+            %fourth = alloca ptr
+
+            %x = call ptr @get()
+            store ptr %third, ptr %x
+            call void @F1(ptr %x)
+
+            %y = call ptr @get()
+            store ptr %fourth, ptr %y
+            call void @F1(ptr %y)
+            ret void
+        }
+
+        define void @entryC() {
+            %fifth = alloca ptr
+
+            %x = call ptr @get()
+            store ptr %fifth, ptr %x
+            call void @F2(ptr %x)
+            ret void
+        }
+
+        declare ptr @get() #0
+        attributes #0 = { allockind("alloc,uninitialized,aligned") allocsize(0) }
+    )");
+
+    const Value *first = findInstruction("entryA", "first");
+    const Value *second = findInstruction("entryA", "second");
+    const Value *xA = findInstruction("entryA", "x");
+    const Value *yA = findInstruction("entryA", "y");
+
+    const Value *third = findInstruction("entryB", "third");
+    const Value *fourth = findInstruction("entryB", "fourth");
+    const Value *xB = findInstruction("entryB", "x");
+    const Value *yB = findInstruction("entryB", "y");
+
+    const Value *fifth = findInstruction("entryC", "fifth");
+    const Value *xC = findInstruction("entryC", "x");
+
+    const Value *load = findInstruction("F2", "load");
+
+    assertPtsToExact(load, {first}, {xA});
+    assertPtsToExact(load, {second}, {yA});
+
+    assertPtsToExact(load, {third}, {xB});
+    assertPtsToExact(load, {fourth}, {yB});
+
+    assertPtsToExact(load, {fifth}, {xC});
 }

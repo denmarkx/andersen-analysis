@@ -688,8 +688,8 @@ void Andersen::addArgumentConstraintForCall(const CallBase *cs, const Function *
       } else
         constraints.emplace_back(AndersConstraint::COPY, fIndex,
                                  nodeFactory.getUniversalPtrNode());
+      ++formalItIdx;
     }
-    ++formalItIdx;
     ++fItr, ++aItr;
   }
 
