@@ -1,3 +1,5 @@
+#include "Andersen.h"
+#include "ContextManager.h"
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 
 #include "AndersenTestFixture.h"
@@ -202,4 +204,38 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "Indirect_Call_From_Global_Function_Point
     assertPtsToSetSize(target, 1);
     assertPtsToSetSize(function, 1);
     assertPtsToContains(function, target);
+}
+
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "Gen_NoErrorOnAbsentPtr") {
+    parseAssembly(R"(
+        define void @main() {
+            %x = alloca ptr
+
+            %v = alloca ptr
+            store ptr %v, ptr %x
+
+            %y = alloca i32
+            store i32 5, ptr %y
+
+            %load_x = load ptr, ptr %x ; {v}
+            %load_y = load ptr, ptr %y ; {}
+            ret void
+        }
+    )");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+    const Value *v = findInstruction("main", "v");
+    const Value *load_x = findInstruction("main", "load_x");
+    const Value *load_y = findInstruction("main", "load_y");
+
+    PtsSetType ptsSetLX;
+    andersen->getPointsToSet(load_x, ptsSetLX, NoContext);
+
+    PtsSetType ptsSetLY;
+    andersen->getPointsToSet(load_y, ptsSetLY, NoContext);
+
+    PtsSetType ptsSet;
+    andersen->getPointsToSet(nullptr, ptsSet, NoContext);
 }

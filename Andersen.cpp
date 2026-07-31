@@ -68,10 +68,12 @@ llvm::AliasResult Andersen::alias(const Value *valueA, const Value *valueB) {
 */
 void Andersen::fillPointsToSet(const llvm::Value* v, PtsSetType &ptsSet, const ContextType context) {
     if (!v->getType()->isPointerTy()) return;
+    
+    NodeIndex vIdx = nodeFactory.getValueNodeFor(v, context);
+    assert(vIdx != AndersNodeFactory::InvalidIndex);
 
-    NodeIndex ptrTgt = nodeFactory.getMergeTarget(
-        nodeFactory.getValueNodeFor(v, context));
-    if (ptrTgt == AndersNodeFactory::InvalidIndex) return;
+    NodeIndex ptrTgt = nodeFactory.getMergeTarget(vIdx);
+    assert(ptrTgt != AndersNodeFactory::InvalidIndex);
 
     std::unordered_set<NodeIndex> visited;
     std::queue<NodeIndex> worklist;
@@ -92,9 +94,10 @@ void Andersen::fillPointsToSet(const llvm::Value* v, PtsSetType &ptsSet, const C
         const llvm::Value *cv = nodeFactory.getValueForNode(c);
         if (!cv) {
             NodeIndex cur = c;
+            assert(cur != AndersNodeFactory::InvalidIndex);
             while (cur != AndersNodeFactory::InvalidIndex && !cv) {
                 NodeIndex base = nodeFactory.getFieldBaseObject(cur);
-                if (base == AndersNodeFactory::InvalidIndex) break;
+                assert(base != AndersNodeFactory::InvalidIndex);
                 cv = nodeFactory.getValueForNode(base);
                 cur = base;
             }
@@ -118,13 +121,14 @@ void Andersen::fillPointsToSet(const llvm::Value* v, PtsSetType &ptsSet, const C
  * Places all the reachable values from the given value into the ptsSet.
 */
 void Andersen::getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const ContextType context) {
-    fillPointsToSet(v, ptsSet, context);
+    if (v) fillPointsToSet(v, ptsSet, context);
 }
 
 /*
  * Places all the reachable values from the given value into the ptsSet.
 */
 void Andersen::getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const SmallVector<const llvm::Value*, 4> contextObjects) {
+    if (!v) return;
 
     ContextType context = NoContext;
     for (const auto &o : contextObjects) {
