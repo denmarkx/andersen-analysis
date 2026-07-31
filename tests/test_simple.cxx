@@ -181,6 +181,57 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "Global_Alias") {
     assertPtsToContains(ptr, count);
 }
 
+TEST_CASE_FIXTURE(AndersenTestFixture, "Global_Nested_Alias") {
+    // All aliases follow back to @count
+    // ..which also means that @aliasA,B,C are NOT values and NOT objects internally.
+    // store ptr @aliasA,B,C,.. is treated as store ptr @count,..
+    parseAssembly(R"(
+        @count = global i32 0
+        @aliasA = alias i32, ptr @count
+        @aliasB = alias i32, ptr @aliasA
+        @aliasC = alias i32, ptr @aliasB
+
+        define void @main() {
+            %ptrA = alloca ptr
+            store ptr @aliasA, ptr %ptrA
+            %loadA = load ptr, ptr %ptrA
+
+            %ptrB = alloca ptr
+            store ptr @aliasB, ptr %ptrB
+            %loadB = load ptr, ptr %ptrB
+
+            %ptrC = alloca ptr
+            store ptr @aliasC, ptr %ptrC
+            %loadC = load ptr, ptr %ptrC
+            ret void
+        }
+    )");
+
+    const Value *count = findGlobal("count");
+    const Value *aliasA = findGlobal("aliasA");
+    const Value *aliasB = findGlobal("aliasB");
+    const Value *aliasC = findGlobal("aliasC");
+
+    const Value *ptrA = findInstruction("main", "ptrA");
+    const Value *ptrB = findInstruction("main", "ptrB");
+    const Value *ptrC = findInstruction("main", "ptrC");
+
+    const Value *loadA = findInstruction("main", "loadA");
+    const Value *loadB = findInstruction("main", "loadB");
+    const Value *loadC = findInstruction("main", "loadC");
+
+    assertPtsToSetSize(count, 1);
+
+    assertPtsToExact(loadA, {count});
+    assertPtsToContains(ptrA, count);
+
+    assertPtsToExact(loadB, {count});
+    assertPtsToContains(ptrB, count);
+
+    assertPtsToExact(loadC, {count});
+    assertPtsToContains(ptrC, count);
+}
+
 TEST_CASE_FIXTURE(AndersenTestFixture, "Indirect_Call_From_Global_Function_Pointer") {
     parseAssembly(R"(
         define void @target() {
