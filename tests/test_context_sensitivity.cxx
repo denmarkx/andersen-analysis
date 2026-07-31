@@ -163,6 +163,79 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Global_Alias") {
     assertPtsToExact(formalArg, {g}, {a});
 }
 
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Global_TwoLevelCall_VoidRet") {
+    parseAssembly(R"(
+        @a = global i32 0
+        @b = global i32 0
+
+        @g = global ptr @a
+        @h = global ptr @b
+
+        define void @F1(ptr %ptr) {
+            call void @F2(ptr %ptr)
+            ret void
+        }
+
+        define void @F2(ptr %ptr) {
+            %load = load ptr, ptr %ptr
+            ret void
+        }
+
+        define void @main() {
+            call void @F1(ptr @g)
+            call void @F1(ptr @h)
+            ret void
+        }
+    )");
+
+    const GlobalVariable *a = findGlobal("a");
+    const GlobalVariable *b = findGlobal("b");
+    const GlobalVariable *g = findGlobal("g");
+    const GlobalVariable *h = findGlobal("h");
+
+    const Value *load = findInstruction("F2", "load");
+
+    assertPtsToExact(load, {a}, {g});
+    assertPtsToExact(load, {b}, {h});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Global_TwoLevelCall_Ret") {
+    parseAssembly(R"(
+        @a = global i32 0
+        @b = global i32 0
+
+        @g = global ptr @a
+        @h = global ptr @b
+
+        define ptr @F1(ptr %ptr) {
+            %v = call ptr @F2(ptr %ptr)
+            ret ptr %v
+        }
+
+        define ptr @F2(ptr %ptr) {
+            %load = load ptr, ptr %ptr
+            ret ptr %load
+        }
+
+        define void @main() {
+            %x = call ptr @F1(ptr @g)
+            %y = call ptr @F1(ptr @h)
+            ret void
+        }
+    )");
+
+    const GlobalVariable *a = findGlobal("a");
+    const GlobalVariable *b = findGlobal("b");
+    const GlobalVariable *g = findGlobal("g");
+    const GlobalVariable *h = findGlobal("h");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+
+    assertPtsToExact(x, {a});
+    assertPtsToExact(y, {b});
+}
+
 TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Field_Sensitive_Simple") {
     parseAssembly(R"(
         %S = type { ptr, ptr }

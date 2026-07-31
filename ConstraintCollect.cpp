@@ -602,14 +602,16 @@ void Andersen::addConstraintForCall(const CallBase* cs, const ContextType contex
   if (const Function *f = cs->getCalledFunction()) { // Direct call
     const NodeIndex fObjIdx = nodeFactory.getObjectNodeFor(f, NoContext);
     auto indices = _summarization.getParameterIndices(fObjIdx);
-    ContextType functionCtx = NoContext;
+    ContextType functionCtx = context;
 
-    // indices -> func ctx id if applicable.
-    for (const auto &i : indices) {
-      const llvm::Value *arg = cs->getArgOperand(i);
-      const NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
-      if (_contextMgr.isContextObject(argIdx))
-        functionCtx.push_back(argIdx);
+    if (context == NoContext) {
+      // indices -> func ctx id if applicable.
+      for (const auto &i : indices) {
+        const llvm::Value *arg = cs->getArgOperand(i);
+        const NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
+        if (_contextMgr.isContextObject(argIdx))
+          functionCtx.push_back(argIdx);
+      }
     }
 
     if (f->isDeclaration() || f->isIntrinsic()) { // External library call
