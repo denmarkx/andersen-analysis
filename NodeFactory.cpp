@@ -144,9 +144,10 @@ const llvm::SmallVector<NodeIndex, 4>& AndersNodeFactory::getFields(NodeIndex id
 NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val, const ContextType context, FieldType fields) {
   if (const Constant *c = dyn_cast<Constant>(val)) {
     if (!isa<GlobalValue>(c)) 
-      return getValueNodeForConstant(c, context, fields);
+      return getValueNodeForConstant(c, NoContext, fields);
     if (isa<GlobalAlias>(c))
       return getValueNodeForAlias(c, fields);
+    return valueNodeMap.get(val, NoContext, fields);
   }
   return valueNodeMap.get(val, context, fields);
 }
@@ -167,7 +168,7 @@ NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c, co
   if (isa<ConstantPointerNull>(c) || isa<UndefValue>(c))
     return getNullPtrNode();
   else if (const GlobalValue *gv = dyn_cast<GlobalValue>(c))
-    return getValueNodeFor(gv, context, fields);
+    return getValueNodeFor(gv, fields);
   else if (const ConstantExpr *ce = dyn_cast<ConstantExpr>(c)) {
     switch (ce->getOpcode()) {
     // Pointer to any field within a struct is treated as a pointer to the first
@@ -177,10 +178,10 @@ NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c, co
       NodeIndex base = getValueNodeFor(c->getOperand(0), {});
       if (base == InvalidIndex)
           return InvalidIndex;
-      NodeIndex existing = getValueNodeFor(c->getOperand(0), context, fields);
+      NodeIndex existing = getValueNodeFor(c->getOperand(0), fields);
       if (existing != InvalidIndex)
           return existing;
-      return createValueNode(c->getOperand(0), context, fields);
+      return createValueNode(c->getOperand(0), fields);
     }
     case Instruction::IntToPtr:
     case Instruction::PtrToInt:
@@ -203,6 +204,7 @@ NodeIndex AndersNodeFactory::getObjectNodeFor(const Value *val, const ContextTyp
       return getObjectNodeForConstant(c, context, fields);
     if (isa<GlobalAlias>(c))
       return getObjectNodeForAlias(c, fields);
+    return objNodeMap.get(val, NoContext, fields);
   }
   return objNodeMap.get(val, context, fields);
 }
@@ -224,13 +226,13 @@ AndersNodeFactory::getObjectNodeForConstant(const llvm::Constant *c, const Conte
   if (isa<ConstantPointerNull>(c))
     return getNullObjectNode();
   else if (const GlobalValue *gv = dyn_cast<GlobalValue>(c))
-    return getObjectNodeFor(gv, context, fields);
+    return getObjectNodeFor(gv, fields);
   else if (const ConstantExpr *ce = dyn_cast<ConstantExpr>(c)) {
     switch (ce->getOpcode()) {
     // Pointer to any field within a struct is treated as a pointer to the first
     // field
     case Instruction::GetElementPtr:
-      return getObjectNodeForConstant(ce->getOperand(0), context, fields);
+      return getObjectNodeForConstant(ce->getOperand(0), fields);
     case Instruction::IntToPtr:
     case Instruction::PtrToInt:
       return getUniversalObjNode();
