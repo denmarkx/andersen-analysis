@@ -133,6 +133,8 @@ void Andersen::getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const Sm
     ContextType context = NoContext;
     for (const auto &o : contextObjects) {
         NodeIndex objIdx = nodeFactory.getObjectNodeFor(o);
+        if (objIdx == AndersNodeFactory::InvalidIndex)
+            objIdx = nodeFactory.getValueNodeFor(o);
         assert(objIdx != AndersNodeFactory::InvalidIndex);
         context.push_back(objIdx);
     }

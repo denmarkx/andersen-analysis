@@ -516,3 +516,79 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Inner_Func_New_Object") {
     assertPtsToExact(loadA, {second}, {y});
     assertPtsToExact(loadB, {data}, {y});
 }
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Phi") {
+    parseAssembly(R"(
+        define void @F1(ptr %ptrA, ptr %ptrC, ptr %ptrB) {
+            %loadA = load ptr, ptr %ptrA
+            %loadB = load ptr, ptr %ptrB
+            %loadC = load ptr, ptr %ptrC
+            ret void
+        }
+
+        define void @main() {
+        entry:
+            %checkPtr = alloca i32
+            %check = load i32, ptr %checkPtr
+
+            %first = alloca ptr
+            %second = alloca ptr
+            %third = alloca ptr
+
+            %x = call ptr @get()
+            store ptr %first, ptr %x
+
+            %y = call ptr @get()
+            store ptr %second, ptr %y
+
+            %z = call ptr @get()
+            store ptr %first, ptr %z
+
+            %w = call ptr @get()
+            store ptr %second, ptr %w
+
+            %c = call ptr @get()
+            store ptr %third, ptr %c
+
+            %cond = icmp eq i32 %check, 5
+            br i1 %cond, label %pathA, label %pathB
+
+        pathA:
+            br label %common
+
+        pathB:
+            br label %common
+
+        common:
+            %phiA = phi ptr [ %x, %pathA ], [ %y, %pathB ]
+            %phiB = phi ptr [ %z, %pathA ], [ %w, %pathB ]
+            call void @F1(ptr %phiA, ptr %c, ptr %phiB)
+            ret void
+        }
+
+        declare ptr @get() #0
+        attributes #0 = { allockind("alloc,uninitialized,aligned") allocsize(0) }
+    )");
+
+    const Value *first = findInstruction("main", "first");
+    const Value *second = findInstruction("main", "second");
+    const Value *third = findInstruction("main", "third");
+
+    const Value *loadA = findInstruction("F1", "loadA");
+    const Value *loadB = findInstruction("F1", "loadB");
+    const Value *loadC = findInstruction("F1", "loadC");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+    const Value *z = findInstruction("main", "z");
+    const Value *w = findInstruction("main", "w");
+    const Value *c = findInstruction("main", "c");
+
+    assertPtsToExact(loadA, {first, second}, {x, c, z});
+    assertPtsToExact(loadA, {first, second}, {x, c, w});
+    assertPtsToExact(loadA, {first, second}, {y, c, z});
+    assertPtsToExact(loadA, {first, second}, {y, c, w});
+
+    assertPtsToExact(loadC, {third}, {x, c, z});
+    assertPtsToExact(loadC, {third}, {y, c, z});
+}

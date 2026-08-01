@@ -229,7 +229,7 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Simple_Interprocedural_GEP_Parameter"
             %s1 = getelementptr inbounds %S, ptr %ptr, i32 0, i32 0
             store ptr %x, ptr %s1
 
-            %s2 = getelementptr inbounds %S, ptr %ptr, i32 0, i32 0
+            %s2 = getelementptr inbounds %S, ptr %ptr, i32 0, i32 1
             store ptr %y, ptr %s2
 
             call void @F1(ptr %s1)
@@ -241,19 +241,18 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Simple_Interprocedural_GEP_Parameter"
     const Value *x = findInstruction("main", "x");
     const Value *y = findInstruction("main", "y");
 
+    const Value *s1 = findInstruction("main", "s1");
+    const Value *s2 = findInstruction("main", "s2");
     const Value *loadF1 = findInstruction("F1", "loadF1");
     const Value *loadF2 = findInstruction("F2", "loadF2");
 
     assertPtsToSetSize(x, 1);
     assertPtsToSetSize(y, 1);
 
-    assertPtsToSetSize(loadF1, 2);
-    assertPtsToContains(loadF1, x);
-    assertPtsToContains(loadF1, y);
-
-    assertPtsToSetSize(loadF2, 2);
-    assertPtsToContains(loadF2, x);
-    assertPtsToContains(loadF2, y);
+    assertPtsToExact(loadF1, {x}, {s1});
+    assertPtsToExact(loadF1, {y}, {s2});
+    assertPtsToExact(loadF2, {x}, {s1});
+    assertPtsToExact(loadF2, {y}, {s2});
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Global_Array_of_Functions") {

@@ -40,6 +40,8 @@ void Andersen::printPointsToSet(const llvm::Value *value, const SmallVector<cons
 
     for (const auto &v : contextObjects) {
       NodeIndex objIdx = nodeFactory.getObjectNodeFor(v);
+      if (objIdx == AndersNodeFactory::InvalidIndex)
+          objIdx = nodeFactory.getValueNodeFor(v);
       assert(objIdx != AndersNodeFactory::InvalidIndex);
       context.push_back(objIdx);
     }
