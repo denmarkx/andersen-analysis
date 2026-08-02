@@ -419,21 +419,21 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Nested_GEP_Expression") {
 TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Pointer_Offset") {
     parseAssembly(R"(
         %S = type { ptr, ptr }
-        %T = type { %S, %S }
+        %T = type { %S, %S, %S }
 
         define void @main() {
-            %ptr = alloca %S
+            %ptr = alloca %T
             %x = alloca i32
 
-            ; i64 1: move by sizeof(%S)
-            ; i32 1: second pointer field within %S
-            ; ..equivalent to: ptr %ptr, i32 0, i32 1, i32 1
-            %s1 = getelementptr %S, ptr %ptr, i64 1, i32 1
+            ; i64 2: move by sizeof(%S)*2 (&ptr[2])
+            ; i32 1: second pointer field within %S (&ptr[2][1])
+            ; ..equivalent to: ptr %ptr, i32 0, i32 2, i32 1
+            %s1 = getelementptr %S, ptr %ptr, i64 2, i32 1
             store ptr %x, ptr %s1
-            %loadS1 = load ptr, ptr %s2
+            %loadS1 = load ptr, ptr %s1
 
             ; ..equivalent to s1:
-            %s2 = getelementptr %T, ptr %ptr, i32 0, i32 1, i32 1
+            %s2 = getelementptr %T, ptr %ptr, i32 0, i32 2, i32 1
             %loadS2 = load ptr, ptr %s2
 
             ret void
@@ -464,12 +464,12 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Byte_Offset") {
             %base = getelementptr inbounds %S, ptr %ptr, i32 0, i32 0
 
             ; Move 8 bytes: &S->field[1]
-            %s1 = getelementptr inbounds i8, ptr %base, i64 1
+            %s1 = getelementptr inbounds i8, ptr %base, i64 3
             store ptr %x, ptr %s1
             %loadS1 = load ptr, ptr %s1
 
             ; Equivalent to %s1
-            %s2 = getelementptr inbounds %S, ptr %ptr, i32 0, i32 0, i32 1
+            %s2 = getelementptr inbounds %S, ptr %ptr, i32 0, i32 0, i32 3
             %loadS2 = load ptr, ptr %s2
 
             ret void

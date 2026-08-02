@@ -106,6 +106,16 @@ namespace NodeMapUtil {
         return nullptr;
     }
 
+    inline void accumlateGEPOffset(const llvm::Value *v, APInt &offset) {
+        const llvm::GetElementPtrInst *gep = dyn_cast<llvm::GetElementPtrInst>(v);
+        if (!gep) return;
+
+        const llvm::Value *src = gep->getOperand(0);
+        if (isa<GetElementPtrInst>(src))
+            accumlateGEPOffset(src, offset);
+        gep->accumulateConstantOffset(gep->getFunction()->getParent()->getDataLayout(), offset);
+    }
+
     /*
      * Attempts to resolve the indices that this value uses.
     */
@@ -138,9 +148,11 @@ namespace NodeMapUtil {
             fields.reserve(gep->getNumIndices());
 
             // Pointer offset:
+            bool accumulatedOffset = false;
             const llvm::Value *offset = gep->getOperand(1);
             if (const ConstantInt *offsetInt = dyn_cast<ConstantInt>(offset)) {
                 if (offsetInt->getZExtValue() > 0) {
+                    const llvm::Value *src = gep->getOperand(0);
                     // Theoretically, we should be able to resolve getFields() on the source.
                     auto indices = getFields(gep->getOperand(0));
                     fields.append(indices.begin(), indices.end());
@@ -149,7 +161,7 @@ namespace NodeMapUtil {
                     // to normalize this back into an index-only instruction.
                     // The main problem with this comes from the fact that we need to figure out
                     // the type of the pointer operand (op0)..because it's an opaque ptr.
-                    llvm::Type *ptrType = findType(gep->getOperand(0));
+                    llvm::Type *ptrType = findType(src);
 
                     // Some instructions will do stuff like use i8 for traversing bytes
                     if (ptrType && ptrType->isAggregateType()) {
@@ -158,28 +170,48 @@ namespace NodeMapUtil {
                         // Byte-wise we move sizeof(ptrType)*offsetInt
                         // The main assumption here is that this won't put us
                         // in the middle of the aggregate..non-standard layouts might..
-                        llvm::TypeSize size = layout.getTypeAllocSize(ptrType);
-                        APInt ap = APInt(
-                            layout.getIndexTypeSizeInBits(offsetInt->getType()),
-                            size * offsetInt->getZExtValue()
-                        );
+                        APInt offset = APInt(layout.getIndexTypeSizeInBits(gep->getType()), 0);
+                        accumlateGEPOffset(gep, offset);
+                        // gep->accumulateConstantOffset(gep->getFunction()->getParent()->getDataLayout(), offset);
 
-                        auto indices = layout.getGEPIndicesForOffset(ptrType, ap);
-                        for (const auto &e: indices)
+                        accumulatedOffset = true;
+
+                        llvm::Type *checkType = gep->getSourceElementType();
+
+                        // In the event that the srcType does not match the ptrType
+                        // ...and the src is NOT a GEP itself, we get indices for offset at root and set fields = {}.
+                        if (!isa<GetElementPtrInst>(src) && ptrType != checkType) {
+                            checkType = ptrType;
+                            fields = {};
+                            llvm::errs() << "setting fields to {}.";
+                        }
+
+                        llvm::errs() << "offset = " << offset.getZExtValue()  << "\n";
+
+                        auto indices = layout.getGEPIndicesForOffset(checkType, offset);
+                        int i = 0;
+                        llvm::errs() << "indices = " << indices[0] << "\n";
+                        for (const auto &e: indices) {
+                            if (fields.empty() && i++ == 0) continue;
                             fields.push_back(e.getZExtValue());
+                            llvm::errs() << e.getZExtValue() << "\n";
+                            i++;
+                        }
                     }
                 }
             }
 
-            for (unsigned int i=2; i < gep->getNumOperands(); i++) {
-                if (const ConstantInt *index = dyn_cast<ConstantInt>(gep->getOperand(i))) {
-                    fields.push_back(index->getZExtValue());
-                    continue;
-                }
+            if (!accumulatedOffset) {
+                for (unsigned int i=2; i < gep->getNumOperands(); i++) {
+                    if (const ConstantInt *index = dyn_cast<ConstantInt>(gep->getOperand(i))) {
+                        fields.push_back(index->getZExtValue());
+                        continue;
+                    }
 
-                // Another thing here is that this may be an actual SSA value.
-                // ..in which case we can't reliably know the value.
-                // ..TODO: I don't actually know what to do here.
+                    // Another thing here is that this may be an actual SSA value.
+                    // ..in which case we can't reliably know the value.
+                    // ..TODO: I don't actually know what to do here.
+                }
             }
         }
 
