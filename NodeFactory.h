@@ -150,6 +150,9 @@ public:
   NodeIndex getOrCreateFieldObject(NodeIndex baseObj, ContextType context = NoContext, const FieldType& fields = {});
   NodeIndex getFieldBaseObject(NodeIndex fieldObj) const;
 
+  // Context-related
+  const ContextType& getContextForObject(NodeIndex idx) const;
+
   // Aggregate-related functions:
   void registerBaseAggregate(NodeIndex, llvm::SmallVector<NodeIndex, 4>);
   bool isBaseAggregate(NodeIndex) const;

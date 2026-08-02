@@ -141,6 +141,11 @@ const llvm::SmallVector<NodeIndex, 4>& AndersNodeFactory::getFields(NodeIndex id
   return nodes[idx].getFields();
 }
 
+const ContextType& AndersNodeFactory::getContextForObject(NodeIndex idx) const {
+  assert(idx < nodes.size() && "Invalid object index sent to getContextForObject.");
+  return nodes[idx].getContext();
+}
+
 NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val, const ContextType context, FieldType fields) {
   if (const Constant *c = dyn_cast<Constant>(val)) {
     if (!isa<GlobalValue>(c)) 

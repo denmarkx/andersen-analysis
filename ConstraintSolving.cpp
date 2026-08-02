@@ -729,8 +729,8 @@ void Andersen::solveConstraints() {
             }
 
             for (auto const &gep : cNode->geps()) {
-              // TODO: context...uhh...
-              NodeIndex fieldObj = nodeFactory.getOrCreateFieldObject(vRep, {}, gep.fields);
+              NodeIndex fieldObj = nodeFactory.getOrCreateFieldObject(vRep, 
+                nodeFactory.getContextForObject(vRep), gep.fields);
               AndersPtsSet& dstPts = ptsGraph[gep.dst];
               if (!dstPts.has(fieldObj)) {
                 dstPts.insert(fieldObj);
