@@ -3,6 +3,7 @@
 
 #include "NodeMap.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Constants.h"
@@ -152,6 +153,7 @@ public:
 
   // Context-related
   const ContextType& getContextForObject(NodeIndex idx) const;
+  const llvm::SmallSet<ContextType, 4> getAllContexts(NodeIndex idx) const;
 
   // Aggregate-related functions:
   void registerBaseAggregate(NodeIndex, llvm::SmallVector<NodeIndex, 4>);

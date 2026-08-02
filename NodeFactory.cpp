@@ -146,6 +146,27 @@ const ContextType& AndersNodeFactory::getContextForObject(NodeIndex idx) const {
   return nodes[idx].getContext();
 }
 
+const llvm::SmallSet<ContextType, 4> AndersNodeFactory::getAllContexts(NodeIndex idx) const {
+  assert(idx < nodes.size() && "Invalid index sent to getAllContexts.");
+
+  // We get either the value or object, but as an llvm::Value
+  const llvm::Value* value = getValueForNode(idx);
+  assert(value != nullptr);
+
+  llvm::SmallSet<ContextType, 4> contexts;
+  auto it = std::find_if(nodes.begin(), nodes.end(), [&value](const AndersNode &node) {
+    return node.value == value;
+  });
+
+  while (it != nodes.end()) {
+    if (!it->getContext().empty())
+      contexts.insert(it->getContext());
+    ++it;
+  }
+
+  return contexts;
+}
+
 NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val, const ContextType context, FieldType fields) {
   if (const Constant *c = dyn_cast<Constant>(val)) {
     if (!isa<GlobalValue>(c)) 
