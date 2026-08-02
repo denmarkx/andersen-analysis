@@ -183,14 +183,10 @@ namespace NodeMapUtil {
                         if (!isa<GetElementPtrInst>(src) && ptrType != checkType) {
                             checkType = ptrType;
                             fields = {};
-                            llvm::errs() << "setting fields to {}.";
                         }
-
-                        llvm::errs() << "offset = " << offset.getZExtValue()  << "\n";
 
                         auto indices = layout.getGEPIndicesForOffset(checkType, offset);
                         int i = 0;
-                        llvm::errs() << "indices = " << indices[0] << "\n";
                         for (const auto &e: indices) {
                             if (fields.empty() && i++ == 0) continue;
                             fields.push_back(e.getZExtValue());
@@ -308,4 +304,42 @@ namespace NodeMapUtil {
 
         return allFields;
     }
+
+    /*
+     * Given an offset limit, returns all possible index paths for the given type whose offset < limit.
+     * This is not meant to really be called directly. Use gettIndicesBelowOffset instead.
+    */
+    inline void recursiveGetIndicesBelowOffset(Type *type, uint64_t curOffset, uint64_t offset,
+        const DataLayout &layout, llvm::SmallVector<unsigned int, 4>& path, std::vector<llvm::SmallVector<unsigned int, 4>>& fullPath) {
+        
+        if (curOffset >= offset) return;
+        if (!path.empty())
+            fullPath.push_back(path);
+
+        if (auto *structTy = dyn_cast<StructType>(type)) {
+            if (structTy->isLiteral() || !structTy->isOpaque()) {
+                const StructLayout *stLayout = layout.getStructLayout(structTy);
+                for (uint64_t i=0; i < structTy->getNumElements(); ++i) {
+                    uint64_t elementOffset = stLayout->getElementOffset(i);
+                    uint64_t absolute = curOffset + elementOffset;
+
+                    if (absolute >= offset) break;
+                    path.push_back(i);
+                    recursiveGetIndicesBelowOffset(structTy->getElementType(i), absolute, offset, layout, path, fullPath);
+                    path.pop_back();
+                }
+            }
+        }
+    }
+
+    /*
+     * Given an offset limit, returns all possible index paths for the given type whose offset < limit.
+    */
+    inline std::vector<llvm::SmallVector<unsigned int, 4>> recursiveGetIndicesBelowOffset(Type *type, uint64_t offset, const DataLayout &layout) {
+        std::vector<llvm::SmallVector<unsigned int, 4>> fullPath;
+        llvm::SmallVector<unsigned int, 4> path;
+        if (type && (type->isStructTy()))
+            recursiveGetIndicesBelowOffset(type, 0, offset, layout, path, fullPath);
+        return fullPath;
+    }    
 };

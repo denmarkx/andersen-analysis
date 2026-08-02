@@ -361,15 +361,20 @@ NodeIndex AndersNodeFactory::getOrCreateFieldObject(NodeIndex baseObj, const Con
     if (baseObj == NullPtrIndex || baseObj == NullObjectIndex)
       return baseObj;
 
+    // Fields being strictly of len 1 and fields[0]==0 implies fields={}
+    FieldType localFields = fields;
+    if (fields.size() == 1 && fields[0] == 0)
+      localFields = {};
+
     const Value *base = getValueForNode(baseObj);
     assert(base != nullptr);
 
     baseObj = getMergeTarget(baseObj);
 
-    if (objNodeMap.contains(base, context, fields))
-      return objNodeMap.get(base, context, fields);
+    if (objNodeMap.contains(base, context, localFields))
+      return objNodeMap.get(base, context, localFields);
 
-    NodeIndex fieldObj = createObjectNode(base, context, fields);
+    NodeIndex fieldObj = createObjectNode(base, context, localFields);
     fieldObjectBaseMap[fieldObj] = baseObj;
     return fieldObj;
 }

@@ -841,3 +841,120 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Insert_Value_Simple_Interprocedural")
     assertPtsToExact(extractU_0, {x});
     assertPtsToExact(extractU_1, {y});
 }
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_memcpy") {
+    parseAssembly(R"(
+        %S = type { ptr, ptr, ptr }
+
+        define void @main() {
+            %ptr = alloca %S
+            %main = alloca %S
+
+            %x = alloca ptr
+            store ptr %x, ptr %main
+
+            %y = alloca ptr
+            %field = getelementptr inbounds %S, ptr %main, i32 0, i32 1 ; [field] = &[main] | Fields = 1
+            store ptr %y, ptr %field ; *[field] = [y]
+
+            ; should copy first 16 bytes of main (being x and y) to ptr.
+            call void @llvm.memcpy.p0.p0.i64(ptr %ptr, ptr %main, i64 16, i1 false)
+
+            %s1 = getelementptr inbounds %S, ptr %ptr, i32 0, i32 0
+            %load1 = load ptr, ptr %s1
+
+            %load1_equiv = load ptr, ptr %ptr
+
+            %s2 = getelementptr inbounds %S, ptr %ptr, i32 0, i32 1
+            %load2 = load ptr, ptr %s2
+            ret void
+        }
+
+        declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)
+    )");
+
+    const Value *ptr = findInstruction("main", "ptr");
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+
+    const Value *load1 = findInstruction("main", "load1");
+    const Value *load_equiv = findInstruction("main", "load1_equiv");
+    const Value *load2 = findInstruction("main", "load2");
+
+    andersen->printPointsToSet(load1);
+    assertPtsToExact(load1, {x});
+    assertPtsToExact(load_equiv, {x});
+    assertPtsToExact(load2, {y});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Nested_memcpy") {
+    parseAssembly(R"(
+        %S = type { ptr, ptr, ptr } ; 24
+        %T = type { %S, %S } ; 48
+
+        define void @main() {
+            %ptr = alloca %T
+            %main = alloca %T
+
+            %x = alloca ptr
+            %fieldA = getelementptr inbounds %T, ptr %main, i32 0, i32 0, i32 1 ; 8-16
+            store ptr %x, ptr %fieldA
+
+            %y = alloca ptr
+            %fieldB = getelementptr inbounds %T, ptr %main, i32 0, i32 0, i32 2 ; 16-24
+            store ptr %y, ptr %fieldB
+
+            %z = alloca ptr
+            %fieldC = getelementptr inbounds %T, ptr %main, i32 0, i32 1, i32 0 ; 24-32
+            store ptr %z, ptr %fieldC
+
+            %w = alloca ptr
+            %fieldD = getelementptr inbounds %T, ptr %main, i32 0, i32 1, i32 1 ; 32-40
+            store ptr %w, ptr %fieldD
+
+            %t = alloca ptr
+            %fieldE = getelementptr inbounds %T, ptr %main, i32 0, i32 1, i32 2 ; 40-48
+            store ptr %t, ptr %fieldE
+
+            ; should copy first 40 bytes of main to ptr {x, y, z, w} but not t.
+            call void @llvm.memcpy.p0.p0.i64(ptr %ptr, ptr %main, i64 40, i1 false)
+
+            %s1 = getelementptr inbounds %T, ptr %ptr, i32 0, i32 0, i32 1
+            %loadA = load ptr, ptr %s1
+
+            %s2 = getelementptr inbounds %T, ptr %ptr, i32 0, i32 0, i32 2
+            %loadB = load ptr, ptr %s2
+
+            %s3 = getelementptr inbounds %T, ptr %ptr, i32 0, i32 1, i32 0
+            %loadC = load ptr, ptr %s3
+
+            %s4 = getelementptr inbounds %T, ptr %ptr, i32 0, i32 1, i32 1
+            %loadD = load ptr, ptr %s4
+
+            %s5 = getelementptr inbounds %T, ptr %ptr, i32 0, i32 1, i32 2
+            %loadE = load ptr, ptr %s5
+
+            ret void
+        }
+
+        declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)
+    )");
+
+    const Value *ptr = findInstruction("main", "ptr");
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+    const Value *z = findInstruction("main", "z");
+    const Value *w = findInstruction("main", "w");
+
+    const Value *loadA = findInstruction("main", "loadA");
+    const Value *loadB = findInstruction("main", "loadB");
+    const Value *loadC = findInstruction("main", "loadC");
+    const Value *loadD = findInstruction("main", "loadD");
+    const Value *loadE = findInstruction("main", "loadE");
+
+    assertPtsToExact(loadA, {x});
+    assertPtsToExact(loadB, {y});
+    assertPtsToExact(loadC, {z});
+    assertPtsToExact(loadD, {w});
+    assertPtsToSetEmpty(loadE);
+}

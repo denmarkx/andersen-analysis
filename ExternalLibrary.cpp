@@ -1,9 +1,11 @@
 #include "Andersen.h"
 #include "Constraint.h"
 #include "NodeFactory.h"
+#include "NodeMapUtil.h"
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
@@ -207,7 +209,42 @@ bool Andersen::addConstraintForExternalLibrary(const CallBase *cs, const Functio
     assert(arg1Index != AndersNodeFactory::InvalidIndex &&
            "Failed to find arg1 node");
 
-    constraints.emplace_back(AndersConstraint::COPY, arg0Index, arg1Index);
+    const llvm::Value *src = cs->getArgOperand(1);
+    const llvm::Value *dest = cs->getArgOperand(0);
+    const llvm::ConstantInt *bytes = dyn_cast<llvm::ConstantInt>(cs->getArgOperand(2));
+    
+    llvm::Type *srcType = NodeMapUtil::findType(src);
+    const DataLayout &layout = cs->getModule()->getDataLayout();
+
+    bool ignoreFullCopy = false;
+    if (srcType && bytes) {
+      uint64_t size = layout.getTypeAllocSize(srcType).getFixedValue();
+
+      // if the sizeof(srcType) and operand 2 are the same, we just do a regular constraint.
+      if (size != bytes->getZExtValue()) {
+        APInt offset = APInt(layout.getTypeAllocSize(srcType), bytes->getZExtValue());
+
+        auto allIndices = NodeMapUtil::recursiveGetIndicesBelowOffset(srcType, offset.getZExtValue(), layout);
+        ignoreFullCopy = true;
+
+        for (const auto &indices : allIndices) {
+          NodeIndex srcGEPIndex = nodeFactory.createValueNode(nullptr, context);
+          NodeIndex srcTmpIndex = nodeFactory.createValueNode(nullptr, context);
+          NodeIndex dstGEPIndex = nodeFactory.createValueNode(nullptr, context);
+
+          constraints.emplace_back(AndersConstraint::GEP, srcGEPIndex, arg1Index, indices); // &src[indices]
+          constraints.emplace_back(AndersConstraint::GEP, dstGEPIndex, arg0Index, indices); // &dst[indices]
+          constraints.emplace_back(AndersConstraint::LOAD, srcTmpIndex, srcGEPIndex); // srcTmpIndex = *src[indices]
+          constraints.emplace_back(AndersConstraint::STORE, dstGEPIndex, srcTmpIndex); // *srcTmpIndex = &dst[indices]
+        }
+      }
+    }
+    
+    if (!ignoreFullCopy) {
+      NodeIndex tempIndex = nodeFactory.createValueNode(nullptr, context);
+      constraints.emplace_back(AndersConstraint::LOAD, tempIndex, arg1Index);
+      constraints.emplace_back(AndersConstraint::STORE, arg0Index, tempIndex);
+    }
 
     // Don't forget the return value
     NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, context);
