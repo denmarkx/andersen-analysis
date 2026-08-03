@@ -47,14 +47,13 @@ llvm::AliasResult Andersen::alias(const Value *valueA, const Value *valueB) {
     for (const auto &context : nodeFactory.getAllContexts(valueBIdx))
         add(alias(valueA, context, valueB, context));
 
-    if (noAlias + mayAlias + mustAlias == 0)
-        return AliasResult::NoAlias;
     if (noAlias && !mayAlias && !mustAlias)
         return AliasResult::NoAlias;
     if (mustAlias && !mayAlias && !noAlias)
         return AliasResult::MustAlias;
     if (noAlias && (mayAlias || mustAlias))
         return AliasResult::MayAlias;
+    return AliasResult::NoAlias;
 }
 
 /*
