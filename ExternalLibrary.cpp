@@ -107,11 +107,23 @@ static bool lookupName(const char *table[], const char *str) {
   return false;
 }
 
+const Function* Andersen::lookupCanonicalCalleeFunction(const CallBase *cs) {
+  // As of right now, pthread_create moves to the routine function:
+  const Function *callee = cs->getCalledFunction();
+  if (!callee) return nullptr;
+
+  if (callee->getName() == "pthread_create") {
+    Function *routine = dyn_cast<Function>(cs->getArgOperand(2));
+    return routine;
+  }
+  return callee;
+}
+
 // This function identifies if the external callsite is a library function call,
 // and add constraint correspondingly If this is a call to a "known" function,
 // add the constraints and return true. If this is a call to an unknown
 // function, return false.
-bool Andersen::addConstraintForExternalLibrary(const CallBase *cs, const Function *f, const ContextType context) {
+bool Andersen::addConstraintForExternalLibrary(const CallBase *cs, const Function *f, const ContextType context, const ContextType funcCtxId) {
   assert(f != nullptr && "called function is nullptr!");
   assert((f->isDeclaration() || f->isIntrinsic()) &&
          "Not an external function!");
@@ -285,23 +297,42 @@ bool Andersen::addConstraintForExternalLibrary(const CallBase *cs, const Functio
   }
 
   // POSIX threads:
-  if (f->getName() == "pthread_create") {
+  if (cs->getCalledFunction()->getName() == "pthread_create") {
     const Instruction *inst = cs;
     const Value* data = cs->getArgOperand(3);
     if (data == nullptr) return false; // Not always given data, e.g., globals.
 
+    Function *routine = dyn_cast<Function>(cs->getArgOperand(2));
+    if (routine == nullptr) return false; // Thread with no routine? Nonsense!
+
     NodeIndex argIndex = nodeFactory.getValueNodeFor(data, context);
     assert(argIndex != AndersNodeFactory::InvalidIndex && "Failed to find argIndex node");
 
-    Function *routine = dyn_cast<Function>(cs->getArgOperand(2));
-    if (routine == nullptr) return false; // Thread with no routine? Nonsense!
+    // If we are coming from a context, we keep it:
+    // If we are coming from noContext, then we want to figure one out:
+    // NodeIndex objIdx = (context == NoContext) ? functionCtxId : context;
+    ContextType baseContext = (context == NoContext) ? funcCtxId : context;
+
+    // If we are tracking an object, we can clone:
+    std::optional<FunctionContext> functionContext = std::nullopt;
+    if (baseContext != NoContext) {
+      NodeIndex baseFunctionIdx = nodeFactory.getObjectNodeFor(routine, NoContext);
+
+      // We may not actually need to clone if this already exists:
+      if (!_contextMgr.doesFunctionContextExist(baseFunctionIdx, baseContext))
+        scanFunction(routine, baseContext);
+
+      // We only need the parameter list, which should be ordered...
+      functionContext = _contextMgr.getFunctionContext(baseFunctionIdx, baseContext);
+    }
 
     size_t argNum = std::distance(routine->args().begin(), routine->args().end());
 
     if (argNum >= 1) {
-      NodeIndex paramIndex = nodeFactory.getValueNodeFor(routine->getArg(0), context);
+      NodeIndex paramIndex = functionContext->parameterIdxs[0];
       assert(paramIndex != AndersNodeFactory::InvalidIndex && "Failed to find paramIndex node");
       constraints.emplace_back(AndersConstraint::COPY, paramIndex, argIndex);
+      addConstraint(AndersConstraint::COPY, data, paramIndex, argIndex, baseContext);
     }
     return true;
   }

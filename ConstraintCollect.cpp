@@ -600,7 +600,7 @@ void Andersen::addConstraintForCall(const CallBase* cs, const ContextType contex
   // Ignore asm calls.
   if (cs->isInlineAsm()) return;
 
-  if (const Function *f = cs->getCalledFunction()) { // Direct call
+  if (const Function *f = lookupCanonicalCalleeFunction(cs)) { // Direct call
     const NodeIndex fObjIdx = nodeFactory.getObjectNodeFor(f, NoContext);
     auto indices = _summarization.getParameterIndices(fObjIdx);
     SmallVector<ContextType, 4> workingContexts = {{}};
@@ -646,12 +646,13 @@ void Andersen::addConstraintForCall(const CallBase* cs, const ContextType contex
     // Since PHI nodes introduce possibility, we need to permute through plausible contexts.
     // TODO: However, I suppose the phi instructions should be theoretically treated as the context.
     // ..because both ways will yield an overapproximation..and direct phi is cheaper than permuting.
+    const Function *callee = cs->getCalledFunction();
     for (const auto &ctx : workingContexts) {
       ContextType functionCtx = (ctx.empty()) ? context : ctx;
 
-      if (f->isDeclaration() || f->isIntrinsic()) { // External library call
+      if (callee->isDeclaration() || callee->isIntrinsic()) { // External library call
         // Handle libraries separately
-        if (addConstraintForExternalLibrary(cs, f, context))
+        if (addConstraintForExternalLibrary(cs, callee, context, functionCtx))
           return;
 
         if (cs->getFunctionType()->isPointerTy()) {
@@ -662,8 +663,8 @@ void Andersen::addConstraintForCall(const CallBase* cs, const ContextType contex
           constraints.emplace_back(AndersConstraint::ADDR_OF, retIndex, fObj);
         }
       } else { // Non-external function call
-        addArgumentConstraintForCall(cs, f, context, functionCtx);
-        addReturnConstraintForCall(cs, f, context, functionCtx);
+        addArgumentConstraintForCall(cs, callee, context, functionCtx);
+        addReturnConstraintForCall(cs, callee, context, functionCtx);
       }
     }
   }

@@ -91,13 +91,15 @@ private:
   void collectConstraintsForInstruction(const llvm::Instruction *, ContextType context = NoContext);
   void addGlobalInitializerConstraints(NodeIndex, const llvm::Constant *);
   void addConstraintForCall(const llvm::CallBase* cs, ContextType context = NoContext);
-  bool addConstraintForExternalLibrary(const llvm::CallBase* cs, const llvm::Function *f, ContextType context = NoContext);
+  bool addConstraintForExternalLibrary(const llvm::CallBase* cs, const llvm::Function *f, ContextType context = NoContext, ContextType funcCtxId = NoContext);
   void addArgumentConstraintForCall(const llvm::CallBase* cs, const llvm::Function *f, ContextType context = NoContext, ContextType funcCtxId = NoContext);
   void addReturnConstraintForCall(const llvm::CallBase* cs, const llvm::Function *f, ContextType context = NoContext, ContextType funcCtxId = NoContext);
   void scanFunction(const llvm::Function *f, ContextType context = NoContext);
   void setupFunctionConstraints(const llvm::Function *f, ContextType context = NoContext);
   void addConstraint(AndersConstraint::ConstraintType, const Value*, NodeIndex, NodeIndex, ContextType contextA = NoContext);
   
+  const Function* lookupCanonicalCalleeFunction(const CallBase*);
+
   NodeIndex findGEPObjectSite(const llvm::Value*, ContextType context);
 
   // Helper functions for constraint optimization
