@@ -11,6 +11,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <cstring>
+#include <iterator>
 
 using namespace llvm;
 
@@ -284,7 +285,6 @@ bool Andersen::addConstraintForExternalLibrary(const CallBase *cs, const Functio
   }
 
   // POSIX threads:
-  // TODO: segfaults if routine does nothing with the arg
   if (f->getName() == "pthread_create") {
     const Instruction *inst = cs;
     const Value* data = cs->getArgOperand(3);
@@ -296,12 +296,13 @@ bool Andersen::addConstraintForExternalLibrary(const CallBase *cs, const Functio
     Function *routine = dyn_cast<Function>(cs->getArgOperand(2));
     if (routine == nullptr) return false; // Thread with no routine? Nonsense!
 
-    if (routine->getNumOperands() > 1) {
+    size_t argNum = std::distance(routine->args().begin(), routine->args().end());
+
+    if (argNum >= 1) {
       NodeIndex paramIndex = nodeFactory.getValueNodeFor(routine->getArg(0), context);
       assert(paramIndex != AndersNodeFactory::InvalidIndex && "Failed to find paramIndex node");
       constraints.emplace_back(AndersConstraint::COPY, paramIndex, argIndex);
     }
-
     return true;
   }
   return false;
