@@ -119,6 +119,8 @@ public:
   bool runOnModule(const llvm::Module &M);
 
   llvm::AliasResult alias(const Value*, const Value*);
+  llvm::AliasResult alias(const Value *valueA, const ContextType valueAContext, const Value *valueB, const ContextType valueBContext);
+
   void getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, ContextType context = NoContext);
   void getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const SmallVector<const llvm::Value*, 4> = {});
   void printPointsToSet(const llvm::Value *v, const SmallVector<const llvm::Value*, 4> = {});

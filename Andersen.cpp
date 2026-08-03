@@ -1,14 +1,61 @@
+#define DEBUG_TYPE "andersen"
+
 #include "Andersen.h"
 #include "NodeFactory.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/IR/Module.h"
-#include <queue>
+
 #include <unordered_set>
+#include <queue>
 
 using namespace llvm;
 
 Andersen::Andersen(const Module &module) { runOnModule(module); }
+
+/*
+ * Determines if valueA is an alias of valueB for ALL of the given contexts:
+ *   For any context, 
+ *      if there is a mix of NoAlias and (MayAlias or MustAlias), we assume MayAlias.
+ *      if there is only NoAlias, we ret NoAlias
+ *      if there is only MustAlias, we ret MustAlias
+*/
+llvm::AliasResult Andersen::alias(const Value *valueA, const Value *valueB) {
+    int noAlias = 0;
+    int mayAlias = 0;
+    int mustAlias = 0;
+
+    const auto add = [&](AliasResult result) {
+        switch(result) {
+            case llvm::AliasResult::NoAlias: { noAlias++; break; }
+            case llvm::AliasResult::MayAlias: { mayAlias++; break; }
+            case llvm::AliasResult::MustAlias: { mustAlias++; break; }
+            default: break;
+        }
+    };
+
+    NodeIndex valueAIdx = nodeFactory.getValueNodeFor(valueA);
+    assert(valueAIdx != AndersNodeFactory::InvalidIndex);
+    
+    NodeIndex valueBIdx = nodeFactory.getValueNodeFor(valueB);
+    assert(valueBIdx != AndersNodeFactory::InvalidIndex);
+
+    for (const auto &context : nodeFactory.getAllContexts(valueAIdx))
+        add(alias(valueA, context, valueB, context));
+
+    for (const auto &context : nodeFactory.getAllContexts(valueBIdx))
+        add(alias(valueA, context, valueB, context));
+
+    if (noAlias + mayAlias + mustAlias == 0)
+        return AliasResult::NoAlias;
+    if (noAlias && !mayAlias && !mustAlias)
+        return AliasResult::NoAlias;
+    if (mustAlias && !mayAlias && !noAlias)
+        return AliasResult::MustAlias;
+    if (noAlias && (mayAlias || mustAlias))
+        return AliasResult::MayAlias;
+}
 
 /*
  * Determines if valueA is an alias of valueB. Returns AliasResult:
@@ -16,7 +63,7 @@ Andersen::Andersen(const Module &module) { runOnModule(module); }
  *  - MayAlias
  *  - MustAlias
 */
-llvm::AliasResult Andersen::alias(const Value *valueA, const Value *valueB) {
+llvm::AliasResult Andersen::alias(const Value *valueA, const ContextType valueAContext, const Value *valueB, const ContextType valueBContext) {
     if (!valueA || !valueB) return AliasResult::NoAlias;
     if (!valueA->getType()->isPointerTy() || !valueB->getType()->isPointerTy()) return AliasResult::NoAlias;
     if (valueA == valueB) return AliasResult::MustAlias;
@@ -24,8 +71,16 @@ llvm::AliasResult Andersen::alias(const Value *valueA, const Value *valueB) {
     MemoryLocation m1(valueA, MemoryLocation::UnknownSize);
     MemoryLocation m2(valueB, MemoryLocation::UnknownSize);
 
-    NodeIndex n1 = nodeFactory.getMergeTarget(nodeFactory.getValueNodeFor(valueA));
-    NodeIndex n2 = nodeFactory.getMergeTarget(nodeFactory.getValueNodeFor(valueB));
+    NodeIndex valueAIdx = nodeFactory.getValueNodeFor(valueA);
+    NodeIndex valueBIdx = nodeFactory.getValueNodeFor(valueB);
+
+    if (valueAIdx == AndersNodeFactory::InvalidIndex || valueBIdx == AndersNodeFactory::InvalidIndex) {
+        LLVM_DEBUG(dbgs() << "(alias): valueA and/or valueB is invalid.");
+        return AliasResult::NoAlias;
+    }
+
+    NodeIndex n1 = nodeFactory.getMergeTarget(valueAIdx);
+    NodeIndex n2 = nodeFactory.getMergeTarget(valueBIdx);
     
     // Merge target is the same: we'll say it aliases:
     if (n1 == n2)
