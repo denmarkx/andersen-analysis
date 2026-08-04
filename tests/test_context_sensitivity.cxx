@@ -584,11 +584,10 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Phi") {
     const Value *w = findInstruction("main", "w");
     const Value *c = findInstruction("main", "c");
 
-    assertPtsToExact(loadA, {first, second}, {x, c, z});
-    assertPtsToExact(loadA, {first, second}, {x, c, w});
-    assertPtsToExact(loadA, {first, second}, {y, c, z});
-    assertPtsToExact(loadA, {first, second}, {y, c, w});
+    const Value *phiA = findInstruction("main", "phiA");
+    const Value *phiB = findInstruction("main", "phiB");
 
-    assertPtsToExact(loadC, {third}, {x, c, z});
-    assertPtsToExact(loadC, {third}, {y, c, z});
+    assertPtsToExact(loadA, {first, second}, {phiA, c, phiB});
+    assertPtsToExact(loadB, {first, second}, {phiA, c, phiB});
+    assertPtsToExact(loadC, {third}, {phiA, c, phiB});
 }

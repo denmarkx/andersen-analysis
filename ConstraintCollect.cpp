@@ -408,6 +408,13 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst, const C
       for (unsigned i = 0, e = phiInst->getNumIncomingValues(); i != e; ++i) {
         NodeIndex srcIndex =
             nodeFactory.getValueNodeFor(phiInst->getIncomingValue(i), context);
+        NodeIndex srcObjIndex =
+            nodeFactory.getObjectNodeFor(phiInst->getIncomingValue(i), context);
+
+        if ((_contextMgr.isContextObject(srcIndex) || _contextMgr.isContextObject(srcObjIndex)) 
+          && !_contextMgr.isContextObject(dstIndex))
+          _contextMgr.registerContextObject(dstIndex);
+
         assert(srcIndex != AndersNodeFactory::InvalidIndex &&
                "Failed to find phi src node");
         constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex);
@@ -603,69 +610,36 @@ void Andersen::addConstraintForCall(const CallBase* cs, const ContextType contex
   if (const Function *f = lookupCanonicalCalleeFunction(cs)) { // Direct call
     const NodeIndex fObjIdx = nodeFactory.getObjectNodeFor(f, NoContext);
     auto indices = _summarization.getParameterIndices(fObjIdx);
-    SmallVector<ContextType, 4> workingContexts = {{}};
+    ContextType functionCtx = context;
 
     if (context == NoContext) {
       // indices -> func ctx id if applicable.
       for (const auto &i : indices) {
-        SmallVector<ContextType, 4> newWorkingContexts;
         const llvm::Value *arg = cs->getArgOperand(i);
-        const NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
-        
-        SmallVector<const Value *> objs;
-
-        // In this case, we are going to have to find the underlying object.
+        NodeIndex argIdx = nodeFactory.getObjectNodeFor(arg, context);
         if (argIdx == AndersNodeFactory::InvalidIndex)
-          // I suppose we could try the value first if its a GEP..since underlying object wouldn't yield..whats there..
-          if (isa<GetElementPtrInst>(arg))
-            objs.push_back(arg);
-          else 
-            getUnderlyingObjects(arg, objs);
-        else
-          objs.push_back(arg);
-
-        for (auto &ctx : workingContexts) {
-          for (const auto &v : objs) {
-            ContextType ctxCopy = ctx;
-            NodeIndex vIdx = AndersNodeFactory::InvalidIndex;
-            if (isa<GetElementPtrInst>(v))
-              vIdx = nodeFactory.getValueNodeFor(v, context);
-            else
-              vIdx = nodeFactory.getObjectNodeFor(v, context);
-            if (_contextMgr.isContextObject(vIdx)) {
-              ctxCopy.push_back(vIdx);
-              newWorkingContexts.push_back(ctxCopy);
-            }
-          }
-        }
-
-        workingContexts = newWorkingContexts;
+          argIdx = nodeFactory.getValueNodeFor(arg, context);
+        if (_contextMgr.isContextObject(argIdx))
+          functionCtx.push_back(argIdx);
       }
     }
 
-    // Since PHI nodes introduce possibility, we need to permute through plausible contexts.
-    // TODO: However, I suppose the phi instructions should be theoretically treated as the context.
-    // ..because both ways will yield an overapproximation..and direct phi is cheaper than permuting.
     const Function *callee = cs->getCalledFunction();
-    for (const auto &ctx : workingContexts) {
-      ContextType functionCtx = (ctx.empty()) ? context : ctx;
+    if (callee->isDeclaration() || callee->isIntrinsic()) { // External library call
+      // Handle libraries separately
+      if (addConstraintForExternalLibrary(cs, callee, context, functionCtx))
+        return;
 
-      if (callee->isDeclaration() || callee->isIntrinsic()) { // External library call
-        // Handle libraries separately
-        if (addConstraintForExternalLibrary(cs, callee, context, functionCtx))
-          return;
-
-        if (cs->getFunctionType()->isPointerTy()) {
-          NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, context);
-          assert(retIndex != AndersNodeFactory::InvalidIndex &&
-                 "Failed to find ret node!");
-          NodeIndex fObj = nodeFactory.createObjectNode(cs, context);
-          constraints.emplace_back(AndersConstraint::ADDR_OF, retIndex, fObj);
-        }
-      } else { // Non-external function call
-        addArgumentConstraintForCall(cs, callee, context, functionCtx);
-        addReturnConstraintForCall(cs, callee, context, functionCtx);
+      if (cs->getFunctionType()->isPointerTy()) {
+        NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, context);
+        assert(retIndex != AndersNodeFactory::InvalidIndex &&
+               "Failed to find ret node!");
+        NodeIndex fObj = nodeFactory.createObjectNode(cs, context);
+        constraints.emplace_back(AndersConstraint::ADDR_OF, retIndex, fObj);
       }
+    } else { // Non-external function call
+      addArgumentConstraintForCall(cs, callee, context, functionCtx);
+      addReturnConstraintForCall(cs, callee, context, functionCtx);
     }
   }
 }
