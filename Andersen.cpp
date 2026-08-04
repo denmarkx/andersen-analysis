@@ -8,11 +8,12 @@
 #include "llvm/IR/Module.h"
 
 #include <unordered_set>
+#include <optional>
 #include <queue>
 
 using namespace llvm;
 
-Andersen::Andersen(const Module &module) { runOnModule(module); }
+Andersen::Andersen(const Module &module, bool solveConstraints) { runOnModule(module, solveConstraints); }
 
 /*
  * Determines if valueA is an alias of valueB for ALL of the given contexts:
@@ -194,4 +195,88 @@ void Andersen::getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const Sm
     }
 
     fillPointsToSet(v, ptsSet, context);
+}
+
+/*
+ * Scans a function based off all possible contexts from some parent function.
+ * Additionally, the user may supply some argument -> formal argument index map.
+ *   (ie: {{some ssa value in parent, n}} where n is the parameter index of function).
+ * 
+ * This is a public API for doing such an operation, but it is really important that this 
+ * happens BEFORE constraints are solved.
+*/
+void Andersen::addFunction(const Function *function, const Function *parent, const std::vector<std::pair<const llvm::Value*, unsigned int>> argumentMap) {
+    if (!function || !parent) return;
+
+    NodeIndex parentIdx = nodeFactory.getObjectNodeFor(parent);
+    assert(parentIdx != AndersNodeFactory::InvalidIndex);
+
+    NodeIndex baseFunctionIdx = nodeFactory.getObjectNodeFor(function, NoContext);
+    assert(baseFunctionIdx != AndersNodeFactory::InvalidIndex);
+
+    for (const auto &context : nodeFactory.getAllContexts(parentIdx)) {
+        // function now inherits all of parent's context.
+        scanFunction(function, context);
+
+        std::optional<FunctionContext> functionContext = 
+            _contextMgr.getFunctionContext(baseFunctionIdx, context);
+        assert(functionContext != std::nullopt);
+
+        // For parameter constraints:
+        for (const auto &[arg, paramIdx] : argumentMap) {
+            assert(paramIdx < functionContext->parameterIdxs.size());
+
+            const NodeIndex argIdx = nodeFactory.getValueNodeFor(arg, context);
+            assert(argIdx != AndersNodeFactory::InvalidIndex);
+
+            // paramIdx is not the nodeindex, its just the actual index.
+            const llvm::Value *formal = parent->getArg(paramIdx);
+            assert(formal != nullptr);
+
+            const NodeIndex formalIdx = functionContext->parameterIdxs[paramIdx];
+            assert(formalIdx != AndersNodeFactory::InvalidIndex);
+
+            addConstraint(AndersConstraint::COPY, formal, formalIdx, argIdx, context);
+        }
+    }
+}
+
+/*
+ * Scans a function based off some given context.
+ * Additionally, the user may supply a final parameter that contains a set of indices to
+ * connect the object_i -> formal-arg_i.
+ * 
+ * This is a public API for doing such an operation, but it is really important that this 
+ * happens BEFORE constraints are solved.
+*/
+void Andersen::addFunction(const Function *function, const ContextValueType objects, const SmallVector<unsigned int, 4> indices) {
+    if (!function) return;
+
+    ContextType context;
+    for (const auto &obj : objects) {
+        NodeIndex objIdx = nodeFactory.getObjectNodeFor(obj);
+        NodeIndex valIdx = nodeFactory.getValueNodeFor(obj);
+        NodeIndex idx = (objIdx != AndersNodeFactory::InvalidIndex) ? objIdx : valIdx;
+        assert(idx != AndersNodeFactory::InvalidIndex);
+        context.push_back(idx);
+    }
+
+    NodeIndex baseFunctionIdx = nodeFactory.getObjectNodeFor(function, NoContext);
+    assert(baseFunctionIdx != AndersNodeFactory::InvalidIndex);
+
+    scanFunction(function, context);
+
+    std::optional<FunctionContext> functionContext = 
+        _contextMgr.getFunctionContext(baseFunctionIdx, context);
+    assert(functionContext != std::nullopt);
+
+    for (const auto &i : indices) {
+        assert(i < functionContext->parameterIdxs.size());
+
+        NodeIndex formalIdx = functionContext->parameterIdxs[i];
+        NodeIndex argIdx = nodeFactory.getValueNodeFor(objects[i]);
+        assert(argIdx != AndersNodeFactory::InvalidIndex);
+
+        addConstraint(AndersConstraint::COPY, function->getArg(i), formalIdx, argIdx, context);
+    }
 }

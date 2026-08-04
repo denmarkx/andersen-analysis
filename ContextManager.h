@@ -4,11 +4,13 @@
 #include "llvm/ADT/Hashing.h"
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/MapVector.h>
+#include <llvm/IR/Instruction.h>
 #include <optional>
 #include <limits>
 
 typedef unsigned int NodeIndex;
 typedef llvm::SmallVector<unsigned int, 4> ContextType;
+typedef llvm::SmallVector<const llvm::Value*, 4> ContextValueType;
 inline llvm::SmallVector<unsigned int, 4> NoContext = {};
 
 namespace llvm {

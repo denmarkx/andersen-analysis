@@ -117,15 +117,21 @@ private:
 public:
   static char ID;
 
-  Andersen(const llvm::Module &);
-  bool runOnModule(const llvm::Module &M);
+  Andersen(const llvm::Module &, bool solveConstraints=true);
+  bool runOnModule(const llvm::Module &M, bool solveConstraints=true);
 
   llvm::AliasResult alias(const Value*, const Value*);
   llvm::AliasResult alias(const Value *valueA, const ContextType valueAContext, const Value *valueB, const ContextType valueBContext);
 
   void getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, ContextType context = NoContext);
-  void getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const SmallVector<const llvm::Value*, 4> = {});
-  void printPointsToSet(const llvm::Value *v, const SmallVector<const llvm::Value*, 4> = {});
+  void getPointsToSet(const llvm::Value *v, PtsSetType &ptsSet, const ContextValueType = {});
+  void printPointsToSet(const llvm::Value *v, const ContextValueType = {});
+
+  void addFunction(const Function*, const Function*, const std::vector<std::pair<const llvm::Value*, unsigned int>>);
+  void addFunction(const Function*, const ContextValueType, const SmallVector<unsigned int, 4>);
+
+  void runConstraintSolver();
+  void dump() const;
 };
 
 class AndersenAAWrapperPass : public llvm::ModulePass {

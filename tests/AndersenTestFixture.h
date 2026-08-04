@@ -28,7 +28,7 @@ typedef const llvm::SmallVector<const Value*, 4> ContextObjects;
 
 class AndersenTestFixture {
 public:
-    void parseAssembly(const string &assembly) {
+    void parseAssembly(const string &assembly, bool solveConstraints=true) {
         SMDiagnostic error;
         module = parseAssemblyString(assembly.c_str(), error, _context);
 
@@ -38,7 +38,11 @@ public:
 
         if (!module)
             report_fatal_error(os.str().c_str());
-        makeAndersen(*module);
+        makeAndersen(*module, solveConstraints);
+    }
+
+    void runAndersen() {
+        andersen->runOnModule(*module);
     }
 
     const Function* findFunction(const string &name) {
@@ -104,8 +108,8 @@ public:
     }
 
 private:
-    void makeAndersen(Module &module) {
-        andersen = std::make_unique<Andersen>(module);
+    void makeAndersen(Module &module, bool solveConstraints) {
+        andersen = std::make_unique<Andersen>(module, solveConstraints);
     }
 
 private:

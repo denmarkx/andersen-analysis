@@ -7,9 +7,7 @@ static bool DumpConstraintInfo = 1;
 static bool DumpResultInfo = 1;
 static bool SilenceEmptyPtsSetInfo = true;
 
-bool Andersen::runOnModule(const Module &M) {
-  collectConstraints(M);
-
+void Andersen::runConstraintSolver() {
   if (DumpDebugInfo)
     dumpConstraintsPlainVanilla();
 
@@ -19,7 +17,9 @@ bool Andersen::runOnModule(const Module &M) {
     dumpConstraints();
 
   solveConstraints();
+}
 
+void Andersen::dump() const {
   if (DumpDebugInfo) {
     errs() << "\n";
     dumpPtsGraphPlainVanilla();
@@ -30,7 +30,15 @@ bool Andersen::runOnModule(const Module &M) {
     errs() << "\n";
     dumpPtsGraphPlainVanilla();
   }
+}
 
+bool Andersen::runOnModule(const Module &M, bool solveCnstrs) {
+  collectConstraints(M);
+
+  if (solveCnstrs)
+    runConstraintSolver();
+
+  dump();
   return false;
 }
 

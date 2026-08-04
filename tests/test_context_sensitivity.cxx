@@ -591,3 +591,86 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Phi") {
     assertPtsToExact(loadB, {first, second}, {phiA, c, phiB});
     assertPtsToExact(loadC, {third}, {phiA, c, phiB});
 }
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_AddFunction_FromMain") {
+    parseAssembly(R"(
+        define void @F1(ptr %ptr) {
+            %load = load ptr, ptr %ptr
+            ret void
+        }
+
+        define void @main() {
+            %first = alloca ptr
+            %second = alloca ptr
+
+            %x = call ptr @get()
+            store ptr %first, ptr %x
+            ret void
+        }
+
+        declare ptr @get() #0
+        attributes #0 = { allockind("alloc,uninitialized,aligned") allocsize(0) }
+    )", false);
+
+    const llvm::Function *F1 = findFunction("F1");
+    const llvm::Function *main = findFunction("main");
+
+    const llvm::Value *x = findInstruction("main", "x");
+    const llvm::Value *first = findInstruction("main", "first");
+    const llvm::Value *load = findInstruction("F1", "load");
+
+    assertPtsToSetEmpty(load);
+
+    // Some function (main) implicitly calls @F1 on ctx x.
+    andersen->addFunction(F1, {x}, {0});
+    andersen->runConstraintSolver();
+
+    assertPtsToExact(load, {first}, {x});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_AddFunction_FromEstablished") {
+    parseAssembly(R"(
+        define void @F1(ptr %ptr) {
+            %load = load ptr, ptr %ptr
+            ret void
+        }
+
+        define void @Intermediate(ptr %x) {
+            %test = alloca ptr
+            store ptr %x, ptr %test
+            ret void
+        }
+
+        define void @main() {
+            %first = alloca ptr
+            %second = alloca ptr
+
+            %x = call ptr @get()
+            store ptr %first, ptr %x
+            call void @Intermediate(ptr %x)
+            ret void
+        }
+
+        declare ptr @get() #0
+        attributes #0 = { allockind("alloc,uninitialized,aligned") allocsize(0) }
+    )", false);
+
+    const llvm::Function *F1 = findFunction("F1");
+    const llvm::Function *Intermediate = findFunction("Intermediate");
+    const llvm::Function *main = findFunction("main");
+
+    const llvm::Value *x = findInstruction("main", "x");
+    const llvm::Value *load = findInstruction("F1", "load");
+    const llvm::Value *first = findInstruction("main", "first");
+
+    const llvm::Value *intermediateParam = findParameter("Intermediate", 0);
+
+    assertPtsToSetEmpty(load);
+
+    // Intermediate implicitly calls @F1 on SOME context where the context
+    //  is attributed to the first parameter of F1:
+    andersen->addFunction(F1, Intermediate, {{intermediateParam, 0}});
+    andersen->runConstraintSolver();
+
+    assertPtsToExact(load, {first}, {x});
+}
