@@ -119,6 +119,12 @@ const Function* Andersen::lookupCanonicalCalleeFunction(const CallBase *cs) {
   return callee;
 }
 
+static unsigned int getAggregateNumElements(const Type *type) {
+  if (type->isStructTy())
+    return type->getStructNumElements();
+  return type->getArrayNumElements();
+}
+
 // This function identifies if the external callsite is a library function call,
 // and add constraint correspondingly If this is a call to a "known" function,
 // add the constraints and return true. If this is a call to an unknown
@@ -227,35 +233,66 @@ bool Andersen::addConstraintForExternalLibrary(const CallBase *cs, const Functio
     const llvm::ConstantInt *bytes = dyn_cast<llvm::ConstantInt>(cs->getArgOperand(2));
     
     llvm::Type *srcType = NodeMapUtil::findType(src);
+    llvm::Type *dstType = NodeMapUtil::findType(dest);
     const DataLayout &layout = cs->getModule()->getDataLayout();
 
-    bool ignoreFullCopy = false;
+    bool useCopyConstraint = true;
     if (srcType && bytes) {
       uint64_t size = layout.getTypeAllocSize(srcType).getFixedValue();
 
       // if the sizeof(srcType) and operand 2 are the same, we just do a regular constraint.
-      if (size != bytes->getZExtValue()) {
+      if ((srcType->isAggregateType() || (dstType && dstType->isAggregateType())) &&
+           (getAggregateNumElements(srcType) > 1 || (dstType && getAggregateNumElements(dstType) > 1))) {
         APInt offset = APInt(layout.getTypeAllocSize(srcType), bytes->getZExtValue());
 
         auto allIndices = NodeMapUtil::recursiveGetIndicesBelowOffset(srcType, offset.getZExtValue(), layout);
-        ignoreFullCopy = true;
+        useCopyConstraint = false;
 
-        for (const auto &indices : allIndices) {
+        for (const auto &fullIndices : allIndices) {
+          auto indices = fullIndices;
+
+          // A few optimizations (which can probably be moved to the NMU func) so that we don't
+          // end up creating more values and constraints than what is needed:
+
+          // case of: &struct = &struct[0]
+          if (indices.size() == 1 && indices[0] == 0) continue;
+
+          // same as above, just for trailing indices.
+          auto it = indices.end();
+          int trimRight = 0;
+          while (it != indices.begin()) {
+            --it;
+            if (*it == 0)
+              trimRight++;
+          }
+
+          indices.pop_back_n(trimRight);
+          if (indices.empty()) continue;
+
+          // same as above, just for inner indices.
+          int sum = 0;
+          for (const auto &i : indices) sum += i;
+          if (sum == 0) continue;
+
+          // we simulate a GEP constraint flow here:
           NodeIndex srcGEPIndex = nodeFactory.createValueNode(nullptr, context);
           NodeIndex srcTmpIndex = nodeFactory.createValueNode(nullptr, context);
           NodeIndex dstGEPIndex = nodeFactory.createValueNode(nullptr, context);
 
           constraints.emplace_back(AndersConstraint::GEP, srcGEPIndex, arg1Index, indices); // &src[indices]
-          constraints.emplace_back(AndersConstraint::GEP, dstGEPIndex, arg0Index, indices); // &dst[indices]
+
+          // dstGEPIndex doesn't blindly follow indices, it accumlates it..similar to what ConstraintCollect does.
+          auto dstIndices = NodeMapUtil::getFields(dest);
+          dstIndices.insert(dstIndices.end(), indices.begin(), indices.end());
+
+          constraints.emplace_back(AndersConstraint::GEP, dstGEPIndex, arg0Index, dstIndices); // &dst[dstIndices]
           constraints.emplace_back(AndersConstraint::LOAD, srcTmpIndex, srcGEPIndex); // srcTmpIndex = *src[indices]
           constraints.emplace_back(AndersConstraint::STORE, dstGEPIndex, srcTmpIndex); // *srcTmpIndex = &dst[indices]
         }
       }
     }
-    
-    // If we're asking to memcpy the entire size of the source, we need to do the fields as well.
-    // In this case, it's perfectly fine to do just a copy constraint.
-    if (!ignoreFullCopy)
+
+    if (useCopyConstraint)
       constraints.emplace_back(AndersConstraint::COPY, arg0Index, arg1Index);
 
     // Don't forget the return value

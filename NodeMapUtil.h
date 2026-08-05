@@ -98,6 +98,19 @@ namespace NodeMapUtil {
                 return gep->getSourceElementType();
         }
 
+        // If it's a paremeter, we can walk back users:
+        if (const Argument *param = dyn_cast<Argument>(value)) {
+            unsigned int argNo = param->getArgNo();
+            const Function *f = param->getParent();
+
+            for (const llvm::User *user : f->users()) {
+                if (const CallBase *call = dyn_cast<CallBase>(user)) {
+                    llvm::Type *type = findType(call->getArgOperand(argNo));
+                    if (type) return type;
+                }
+            }
+        }
+
         for (const llvm::User *user : value->users()) {
             llvm::Type *type = findType(user);
             if (type) return type;

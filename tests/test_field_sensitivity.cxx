@@ -881,7 +881,6 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_memcpy") {
     const Value *load_equiv = findInstruction("main", "load1_equiv");
     const Value *load2 = findInstruction("main", "load2");
 
-    andersen->printPointsToSet(load1);
     assertPtsToExact(load1, {x});
     assertPtsToExact(load_equiv, {x});
     assertPtsToExact(load2, {y});
@@ -957,4 +956,71 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Nested_memcpy") {
     assertPtsToExact(loadC, {z});
     assertPtsToExact(loadD, {w});
     assertPtsToSetEmpty(loadE);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_MEMCPY_On_Field") {
+    parseAssembly(R"(
+        %S = type { ptr, { ptr, ptr }, ptr }
+        %T = type { ptr, ptr, ptr }
+
+        define void @main() {
+            %main = alloca %S
+            %container = alloca %T
+            %data = alloca ptr
+
+            %cFieldA = getelementptr inbounds %T, ptr %container, i32 0, i32 1
+            store ptr %data, ptr %cFieldA
+
+            %fieldA = getelementptr inbounds %S, ptr %main, i32 0, i32 1
+            call void @llvm.memcpy.p0.p0.i64(ptr %fieldA, ptr %container, i64 16, i1 false)
+
+            %fieldA_Inner = getelementptr inbounds %S, ptr %main, i32 0, i32 1, i32 1
+            %loadA = load ptr, ptr %fieldA_Inner
+
+            ret void
+        }
+
+        declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)
+    )");
+
+    const Value *data = findInstruction("main", "data");
+    const Value *loadA = findInstruction("main", "loadA");
+    assertPtsToExact(loadA, {data});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_MEMCPY_On_Field_From_Parameter") {
+    parseAssembly(R"(
+        %S = type { ptr, { ptr, ptr }, ptr }
+        %T = type { ptr, ptr, ptr }
+
+        define void @Create(ptr %_0) {
+            %main = alloca %S
+            
+            %fieldA = getelementptr inbounds %S, ptr %main, i32 0, i32 1
+            call void @llvm.memcpy.p0.p0.i64(ptr %fieldA, ptr %_0, i64 16, i1 false)
+
+            %fieldA_Inner = getelementptr inbounds %S, ptr %main, i32 0, i32 1, i32 1
+            %loadA = load ptr, ptr %fieldA_Inner
+            ret void
+        }
+
+        define void @main() {
+            %container = alloca %T
+            %data = alloca ptr
+
+            %cFieldA = getelementptr inbounds %T, ptr %container, i32 0, i32 1
+            store ptr %data, ptr %cFieldA
+
+            call void @Create(ptr %container)
+
+            ret void
+        }
+
+        declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)
+    )");
+
+    const Value *data = findInstruction("main", "data");
+    const Value *container = findInstruction("main", "container");
+    const Value *loadA = findInstruction("Create", "loadA");
+    assertPtsToExact(loadA, {data}, {container});
 }

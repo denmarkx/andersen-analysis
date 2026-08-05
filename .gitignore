@@ -1,7 +1,8 @@
 .*/
 build/
-files/
+/files/
 *.clangd
 *.json
 *.png
 *.ll
+!/tests/*/*.ll
