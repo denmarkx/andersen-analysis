@@ -154,14 +154,10 @@ const llvm::SmallSet<ContextType, 4> AndersNodeFactory::getAllContexts(NodeIndex
   assert(value != nullptr);
 
   llvm::SmallSet<ContextType, 4> contexts;
-  auto it = std::find_if(nodes.begin(), nodes.end(), [&value](const AndersNode &node) {
-    return node.value == value;
-  });
-
-  while (it != nodes.end()) {
-    if (!it->getContext().empty())
-      contexts.insert(it->getContext());
-    ++it;
+  for (const auto &node : nodes) {
+    if (node.value != value) continue;
+    if (!node.getContext().empty())
+      contexts.insert(node.getContext());
   }
 
   return contexts;
