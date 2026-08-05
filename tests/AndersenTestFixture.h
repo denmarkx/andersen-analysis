@@ -6,6 +6,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/IR/GlobalVariable.h>
+#include <llvm/IRReader/IRReader.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -28,6 +29,18 @@ typedef const llvm::SmallVector<const Value*, 4> ContextObjects;
 
 class AndersenTestFixture {
 public:
+    void parseFile(const string &filename, bool solveConstraints=true) {
+        SMDiagnostic error;
+        module = parseIRFile(filename, error, _context);
+        string message;
+        raw_string_ostream os(message);
+        error.print("", os);
+
+        if (!module)
+            report_fatal_error(os.str().c_str());
+        makeAndersen(*module, solveConstraints);
+    }
+
     void parseAssembly(const string &assembly, bool solveConstraints=true) {
         SMDiagnostic error;
         module = parseAssemblyString(assembly.c_str(), error, _context);
