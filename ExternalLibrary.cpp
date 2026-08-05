@@ -253,26 +253,27 @@ bool Andersen::addConstraintForExternalLibrary(const CallBase *cs, const Functio
 
           // A few optimizations (which can probably be moved to the NMU func) so that we don't
           // end up creating more values and constraints than what is needed:
+          // TODO: this is useful, but its inconsistent with how geps are currently done.
 
           // case of: &struct = &struct[0]
-          if (indices.size() == 1 && indices[0] == 0) continue;
+          // if (indices.size() == 1 && indices[0] == 0) continue;
 
           // same as above, just for trailing indices.
-          auto it = indices.end();
-          int trimRight = 0;
-          while (it != indices.begin()) {
-            --it;
-            if (*it == 0)
-              trimRight++;
-          }
+          // auto it = indices.end();
+          // int trimRight = 0;
+          // while (it != indices.begin()) {
+            // --it;
+            // if (*it == 0)
+              // trimRight++;
+          // }
 
-          indices.pop_back_n(trimRight);
-          if (indices.empty()) continue;
+          // indices.pop_back_n(trimRight);
+          // if (indices.empty()) continue;
 
           // same as above, just for inner indices.
-          int sum = 0;
-          for (const auto &i : indices) sum += i;
-          if (sum == 0) continue;
+          // int sum = 0;
+          // for (const auto &i : indices) sum += i;
+          // if (sum == 0) continue;
 
           // we simulate a GEP constraint flow here:
           NodeIndex srcGEPIndex = nodeFactory.createValueNode(nullptr, context);
