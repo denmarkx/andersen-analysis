@@ -276,19 +276,19 @@ bool Andersen::addConstraintForExternalLibrary(const CallBase *cs, const Functio
           // if (sum == 0) continue;
 
           // we simulate a GEP constraint flow here:
-          NodeIndex srcGEPIndex = nodeFactory.createValueNode(nullptr, context);
+          // NodeIndex srcGEPIndex = nodeFactory.createValueNode(nullptr, context);
           NodeIndex srcTmpIndex = nodeFactory.createValueNode(nullptr, context);
-          NodeIndex dstGEPIndex = nodeFactory.createValueNode(nullptr, context);
+          // NodeIndex dstGEPIndex = nodeFactory.createValueNode(nullptr, context);
 
-          constraints.emplace_back(AndersConstraint::GEP, srcGEPIndex, arg1Index, indices); // &src[indices]
+          // constraints.emplace_back(AndersConstraint::GEP, srcGEPIndex, arg1Index, indices); // &src[indices]
 
           // dstGEPIndex doesn't blindly follow indices, it accumlates it..similar to what ConstraintCollect does.
           auto dstIndices = NodeMapUtil::getFields(dest);
           dstIndices.insert(dstIndices.end(), indices.begin(), indices.end());
 
-          constraints.emplace_back(AndersConstraint::GEP, dstGEPIndex, arg0Index, dstIndices); // &dst[dstIndices]
-          constraints.emplace_back(AndersConstraint::LOAD, srcTmpIndex, srcGEPIndex); // srcTmpIndex = *src[indices]
-          constraints.emplace_back(AndersConstraint::STORE, dstGEPIndex, srcTmpIndex); // *srcTmpIndex = &dst[indices]
+          // constraints.emplace_back(AndersConstraint::GEP, dstGEPIndex, arg0Index, dstIndices); // &dst[dstIndices]
+          constraints.emplace_back(AndersConstraint::LOAD, srcTmpIndex, arg1Index, indices); // srcTmpIndex = *src[indices]
+          constraints.emplace_back(AndersConstraint::STORE, arg0Index, srcTmpIndex, dstIndices); // *srcTmpIndex = &dst[indices]
         }
       }
     }

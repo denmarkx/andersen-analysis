@@ -34,6 +34,12 @@ struct GepEdge {
     FieldType fields;
 };
 
+// TODO: once validated, this should be normalized
+struct LSEdge {
+  NodeIndex dst;
+  FieldType fields;
+};
+
 // This class represent the constraint graph
 class ConstraintGraphNode {
 private:
@@ -43,8 +49,8 @@ private:
   using NodeSet = llvm::SmallVector<NodeIndex, 4>;
 
   NodeSet copyEdges;
-  NodeSet loadEdges;
-  NodeSet storeEdges;
+  SmallVector<LSEdge, 4> loadEdges;
+  SmallVector<LSEdge, 4> storeEdges;
 
   static bool insertEdge(NodeSet &vec, NodeIndex dst) {
     if (llvm::is_contained(vec, dst))
@@ -63,13 +69,23 @@ private:
     return true;
   }
 
+  static bool removeEdge(SmallVector<LSEdge, 4> &edges, NodeIndex dst) {
+    auto it = llvm::find_if(edges, [&dst](const LSEdge& e) { return e.dst == dst; });
+    if (it == edges.end())
+      return false;
+
+    *it = edges.back();
+    edges.pop_back();
+    return true;
+  }
+
   bool insertCopyEdge(NodeIndex dst) { return insertEdge(copyEdges, dst); }
   bool removeCopyEdge(NodeIndex dst) { return removeEdge(copyEdges, dst); }
 
-  bool insertLoadEdge(NodeIndex dst) { return insertEdge(loadEdges, dst); }
+  bool insertLoadEdge(NodeIndex dst, FieldType fields) { loadEdges.push_back({dst, fields}); return true; }
   bool removeLoadEdge(NodeIndex dst) { return removeEdge(loadEdges, dst); }
 
-  bool insertStoreEdge(NodeIndex dst) { return insertEdge(storeEdges, dst); }
+  bool insertStoreEdge(NodeIndex dst, FieldType fields) { storeEdges.push_back({dst, fields}); return true; }
   bool removeStoreEdge(NodeIndex dst) { return removeEdge(storeEdges, dst); }
 
   bool addGepEdge(NodeIndex dst, FieldType fields) {
@@ -86,10 +102,10 @@ private:
       insertCopyEdge(e);
 
     for (auto e : other.loadEdges)
-      insertLoadEdge(e);
+      insertLoadEdge(e.dst, e.fields);
 
     for (auto e : other.storeEdges)
-      insertStoreEdge(e);
+      insertStoreEdge(e.dst, e.fields);
   }
 
   ConstraintGraphNode(NodeIndex i) : idx(i) {
@@ -109,11 +125,25 @@ public:
   }
 
   bool replaceLoadEdge(NodeIndex oldIdx, NodeIndex newIdx) {
-    return removeLoadEdge(oldIdx) && insertLoadEdge(newIdx);
+    bool changed = false;
+    for (auto &e : loadEdges) {
+      if (e.dst == oldIdx) {
+        e.dst = newIdx;
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   bool replaceStoreEdge(NodeIndex oldIdx, NodeIndex newIdx) {
-    return removeStoreEdge(oldIdx) && insertStoreEdge(newIdx);
+    bool changed = false;
+    for (auto &e : storeEdges) {
+      if (e.dst == oldIdx) {
+        e.dst = newIdx;
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   void replaceGepEdge(NodeIndex oldDst, NodeIndex newDst) {
@@ -129,18 +159,18 @@ public:
   const_iterator begin() const { return copyEdges.begin(); }
   const_iterator end() const { return copyEdges.end(); }
 
-  const_iterator load_begin() const { return loadEdges.begin(); }
-  const_iterator load_end() const { return loadEdges.end(); }
+  auto load_begin() const { return loadEdges.begin(); }
+  auto load_end() const { return loadEdges.end(); }
 
-  llvm::iterator_range<const_iterator> loads() const {
-    return {load_begin(), load_end()};
+  const SmallVector<LSEdge,4>& loads() const {
+    return loadEdges;
   }
 
-  const_iterator store_begin() const { return storeEdges.begin(); }
-  const_iterator store_end() const { return storeEdges.end(); }
+  auto store_begin() const { return storeEdges.begin(); }
+  auto store_end() const { return storeEdges.end(); }
 
-  llvm::iterator_range<const_iterator> stores() const {
-    return {store_begin(), store_end()};
+  const SmallVector<LSEdge,4>& stores() const {
+    return storeEdges;
   }
 
   auto gep_begin() { return GepEdges.begin(); }
@@ -180,26 +210,14 @@ public:
       return (itr->second).insertCopyEdge(dst);
   }
 
-  bool insertLoadEdge(NodeIndex src, NodeIndex dst) {
-    auto itr = graph.find(src);
-    if (itr == graph.end()) {
-      ConstraintGraphNode srcNode(src);
-      srcNode.insertLoadEdge(dst);
-      graph.insert(std::make_pair(src, std::move(srcNode)));
-      return true;
-    } else
-      return (itr->second).insertLoadEdge(dst);
+  bool insertLoadEdge(NodeIndex src, NodeIndex dst, FieldType fields) {
+    ConstraintGraphNode *node = getOrInsertNode(src);
+    return node->insertLoadEdge(dst, fields);
   }
 
-  bool insertStoreEdge(NodeIndex src, NodeIndex dst) {
-    auto itr = graph.find(src);
-    if (itr == graph.end()) {
-      ConstraintGraphNode srcNode(src);
-      srcNode.insertStoreEdge(dst);
-      graph.insert(std::make_pair(src, std::move(srcNode)));
-      return true;
-    } else
-      return (itr->second).insertStoreEdge(dst);
+  bool insertStoreEdge(NodeIndex dst, NodeIndex src, FieldType fields) {
+    ConstraintGraphNode *node = getOrInsertNode(dst);
+    return node->insertStoreEdge(src, fields);
   }
 
   bool insertGepEdge(NodeIndex src,NodeIndex dst,const FieldType &fields) {
@@ -454,11 +472,11 @@ void buildConstraintGraph(ConstraintGraph &cGraph,
       break;
     }
     case AndersConstraint::LOAD: {
-      cGraph.insertLoadEdge(srcTgt, dstTgt);
+      cGraph.insertLoadEdge(srcTgt, dstTgt, c.getFields());
       break;
     }
     case AndersConstraint::STORE: {
-      cGraph.insertStoreEdge(dstTgt, srcTgt);
+      cGraph.insertStoreEdge(dstTgt, srcTgt, c.getFields());
       break;
     }
     case AndersConstraint::COPY: {
@@ -683,10 +701,13 @@ void Andersen::solveConstraints() {
           for (auto v : delta) {
             NodeIndex vRep = nodeFactory.getMergeTarget(v);
             for (auto dst : cNode->loads()) {
-              NodeIndex tgtNode = nodeFactory.getMergeTarget(dst);
+              NodeIndex tgtNode = nodeFactory.getMergeTarget(dst.dst);
               // errs() << "Examining load edge " << node << " -> " << tgtNode <<
               // "\n";
-              if (constraintGraph.insertCopyEdge(vRep, tgtNode)) {
+              NodeIndex srcLoc = dst.fields.empty()
+                ? vRep
+                : nodeFactory.getOrCreateFieldObject(vRep, nodeFactory.getContextForObject(vRep), dst.fields);
+              if (constraintGraph.insertCopyEdge(srcLoc, tgtNode)) {
                 // errs() << "\tInsert copy edge " << v << " -> " << tgtNode <<
                 // "\n";
                 auto vRepPtsItr = ptsGraph.find(vRep);
@@ -702,13 +723,16 @@ void Andersen::solveConstraints() {
 
               // If we find that dst has been merged to elsewhere, remember this
               // fact to update the constraint graph later
-              if (tgtNode != dst)
-                updateMap[dst] = tgtNode;
+              if (tgtNode != dst.dst)
+                updateMap[dst.dst] = tgtNode;
             }
 
             for (auto const &dst : cNode->stores()) {
-              NodeIndex tgtNode = nodeFactory.getMergeTarget(dst);
-              if (constraintGraph.insertCopyEdge(tgtNode, vRep)) {
+              NodeIndex tgtNode = nodeFactory.getMergeTarget(dst.dst);
+              NodeIndex dstLoc = dst.fields.empty()
+                ? vRep
+                : nodeFactory.getOrCreateFieldObject(vRep, nodeFactory.getContextForObject(vRep), dst.fields);
+              if (constraintGraph.insertCopyEdge(tgtNode, dstLoc)) {
                 // errs() << "\tInsert copy edge " << tgtNode << " -> " << v <<
                 // "\n";
                 auto tgtPtsItr = ptsGraph.find(tgtNode);
@@ -724,8 +748,8 @@ void Andersen::solveConstraints() {
 
               // If we find that dst has been merged to elsewhere, remember this
               // fact to update the constraint graph later
-              if (tgtNode != dst)
-                updateMap[dst] = tgtNode;
+              if (tgtNode != dst.dst)
+                updateMap[dst.dst] = tgtNode;
             }
 
             for (auto const &gep : cNode->geps()) {
