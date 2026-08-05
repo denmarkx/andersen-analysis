@@ -49,33 +49,6 @@ namespace NodeMapUtil {
                     isa<LoadInst>(user)
                 );
         });
-
-        if (itr == param->users().end()) {
-            // Let's move up to the original callsite and check the arg's uses.
-            // I suppose only if we're still a formal argument:
-            const Argument *formal = dyn_cast<Argument>(param);
-            if (!formal) return nullptr;
-
-            if (1) {
-                // const Function *function = formal->getParent();
-
-                // // Get the index of this param.
-                // unsigned int paramId = ~0u;
-                // for (unsigned int i=0; i < function->arg_size(); i++)
-                //     if (function->getArg(i) == formal)
-                //         paramId = i;
-
-                // if (paramId == ~0u)
-                //     return nullptr;
-
-                // const CallBase *call = dyn_cast<CallBase>(ctx->callSite);
-
-                // // Then get the argument from the call:
-                // return findAggregateFromParam(call->getArgOperand(paramId));
-            }
-            return nullptr;
-        }
-
         return *itr;
     }
 
@@ -100,6 +73,10 @@ namespace NodeMapUtil {
 
         // If it's a paremeter, we can walk back users:
         if (const Argument *param = dyn_cast<Argument>(value)) {
+            // Prior to doing users, if this is an sret we can figure out the type from that:
+            if (param->hasStructRetAttr())
+                return param->getParamStructRetType();
+
             unsigned int argNo = param->getArgNo();
             const Function *f = param->getParent();
 
@@ -185,7 +162,6 @@ namespace NodeMapUtil {
                         // in the middle of the aggregate..non-standard layouts might..
                         APInt offset = APInt(layout.getIndexTypeSizeInBits(gep->getType()), 0);
                         accumlateGEPOffset(gep, offset);
-                        // gep->accumulateConstantOffset(gep->getFunction()->getParent()->getDataLayout(), offset);
 
                         accumulatedOffset = true;
 
@@ -203,7 +179,6 @@ namespace NodeMapUtil {
                         for (const auto &e: indices) {
                             if (fields.empty() && i++ == 0) continue;
                             fields.push_back(e.getZExtValue());
-                            llvm::errs() << e.getZExtValue() << "\n";
                             i++;
                         }
                     }
@@ -226,9 +201,6 @@ namespace NodeMapUtil {
 
         // Parameter:
         else if (const Argument *param = dyn_cast<Argument>(value)) {
-            // TODO: sret will show the aggregate type (param->getParamStructRetType)
-            // TODO: DWARF metadata will send me in circles, but that is what should be checked next.
-
             // The last actual thing I can think of to try is walking the users to find a GEP:
             const llvm::Value *candidate = findAggregateFromParam(param);
             return getFields(candidate);
