@@ -253,11 +253,10 @@ bool Andersen::addConstraintForExternalLibrary(const CallBase *cs, const Functio
       }
     }
     
-    if (!ignoreFullCopy) {
-      NodeIndex tempIndex = nodeFactory.createValueNode(nullptr, context);
-      constraints.emplace_back(AndersConstraint::LOAD, tempIndex, arg1Index);
-      constraints.emplace_back(AndersConstraint::STORE, arg0Index, tempIndex);
-    }
+    // If we're asking to memcpy the entire size of the source, we need to do the fields as well.
+    // In this case, it's perfectly fine to do just a copy constraint.
+    if (!ignoreFullCopy)
+      constraints.emplace_back(AndersConstraint::COPY, arg0Index, arg1Index);
 
     // Don't forget the return value
     NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, context);
