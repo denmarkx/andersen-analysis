@@ -300,7 +300,7 @@ namespace NodeMapUtil {
         llvm::SmallVector<unsigned int, 4>& path, std::vector<llvm::SmallVector<unsigned int, 4>>& fullPath) {
         
         if (curOffset >= offset) return;
-        if (!path.empty() && (type->isAggregateType() || type->isPointerTy()))
+        if (!path.empty() && type->isPointerTy())
             fullPath.push_back(path);
 
         if (auto *structTy = dyn_cast<StructType>(type)) {
