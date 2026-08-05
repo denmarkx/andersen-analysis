@@ -49,6 +49,8 @@ namespace NodeMapUtil {
                     isa<LoadInst>(user)
                 );
         });
+
+        if (itr == param->users().end()) return nullptr;
         return *itr;
     }
 
@@ -294,11 +296,11 @@ namespace NodeMapUtil {
      * Given an offset limit, returns all possible index paths for the given type whose offset < limit.
      * This is not meant to really be called directly. Use gettIndicesBelowOffset instead.
     */
-    inline void recursiveGetIndicesBelowOffset(Type *type, uint64_t curOffset, uint64_t offset,
-        const DataLayout &layout, llvm::SmallVector<unsigned int, 4>& path, std::vector<llvm::SmallVector<unsigned int, 4>>& fullPath) {
+    inline void recursiveGetIndicesBelowOffset(Type *type, uint64_t curOffset, uint64_t offset, const DataLayout &layout,
+        llvm::SmallVector<unsigned int, 4>& path, std::vector<llvm::SmallVector<unsigned int, 4>>& fullPath) {
         
         if (curOffset >= offset) return;
-        if (!path.empty())
+        if (!path.empty() && (type->isAggregateType() || type->isPointerTy()))
             fullPath.push_back(path);
 
         if (auto *structTy = dyn_cast<StructType>(type)) {
@@ -320,7 +322,8 @@ namespace NodeMapUtil {
     /*
      * Given an offset limit, returns all possible index paths for the given type whose offset < limit.
     */
-    inline std::vector<llvm::SmallVector<unsigned int, 4>> recursiveGetIndicesBelowOffset(Type *type, uint64_t offset, const DataLayout &layout) {
+    inline std::vector<llvm::SmallVector<unsigned int, 4>> recursiveGetIndicesBelowOffset(Type *type, 
+        uint64_t offset, const DataLayout &layout) {
         std::vector<llvm::SmallVector<unsigned int, 4>> fullPath;
         llvm::SmallVector<unsigned int, 4> path;
         if (type && (type->isStructTy()))

@@ -13,15 +13,6 @@
 
 #include <queue>
 
-// TODO: DNI
-static void print_field_vec(const SmallVector<unsigned int, 4> &fields) {
-    errs() << "Fields: [";
-    for (const auto &x: fields) {
-        errs() << x << " ";
-    }
-    errs() << "]\n";
-}
-
 using namespace llvm;
 
 // CollectConstraints - This stage scans the program, adding a constraint to the
