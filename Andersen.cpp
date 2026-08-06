@@ -146,6 +146,10 @@ void Andersen::fillPointsToSet(const llvm::Value* v, PtsSetType &ptsSet, const C
         unsigned int c = worklist.front();
         worklist.pop();
 
+        if (c == nodeFactory.getUniversalObjNode() ||
+            c == nodeFactory.getNullObjectNode())
+        continue;
+
         const llvm::Value *cv = nodeFactory.getValueForNode(c);
         if (!cv) {
             NodeIndex cur = c;
@@ -165,7 +169,9 @@ void Andersen::fillPointsToSet(const llvm::Value* v, PtsSetType &ptsSet, const C
         auto ptsItr2 = ptsGraph.find(c);
         if (ptsItr2 == ptsGraph.end()) continue;
         for (auto vx : ptsItr2->second) {
-            if (vx == nodeFactory.getNullObjectNode()) continue;
+            if (vx == nodeFactory.getNullObjectNode() ||
+                vx == nodeFactory.getUniversalObjNode())
+            continue;
             if (visited.insert(vx).second)
                 worklist.push(vx);
         }
