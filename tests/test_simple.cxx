@@ -323,7 +323,6 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "General_Loop_Like") {
     assertPtsToContains(load, c);
 }
 
-// TODO:
 TEST_CASE_FIXTURE(AndersenTestFixture, "General_IntToPtr_PtrToInt") {
     parseAssembly(R"(
         define void @main() {

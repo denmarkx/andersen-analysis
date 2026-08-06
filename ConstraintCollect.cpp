@@ -443,10 +443,7 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst, const C
       NodeIndex srcIndex = nodeFactory.getValueNodeFor(srcValue, context);
       assert(srcIndex != AndersNodeFactory::InvalidIndex &&
              "Failed to find inttoptr src node");
-      NodeIndex freshObj = nodeFactory.createObjectNode(nullptr);
-      NodeIndex freshPtr = nodeFactory.createValueNode(nullptr);
-      constraints.emplace_back(AndersConstraint::ADDR_OF, freshPtr, freshObj);
-      constraints.emplace_back(AndersConstraint::COPY, dstIndex, freshPtr);
+      constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex);
       break;
     }
 

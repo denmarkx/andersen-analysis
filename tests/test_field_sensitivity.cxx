@@ -1242,7 +1242,6 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_FunctionPointer_Struct") {
     assertPtsToSetSize(dropFunc, 1);
 }
 
-// TODO:
 TEST_CASE_FIXTURE(AndersenTestFixture, "FS_FunctionPointer_Array") {
     parseAssembly(R"(
         define void @F1() { ret void }
@@ -1261,15 +1260,24 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_FunctionPointer_Array") {
             %s2 = getelementptr inbounds [3 x ptr], ptr %ptr, i32 0, i32 2
             store ptr @F3, ptr %s2
 
-            %load1 = load ptr, ptr %s1
+            %load1 = load ptr, ptr %s0
+            %load2 = load ptr, ptr %s1
+            %load3 = load ptr, ptr %s2
             ret void
         }
     )");
 
     const Value *F1 = findFunction("F1");
+    const Value *F2 = findFunction("F2");
+    const Value *F3 = findFunction("F3");
+
     const Value *load1 = findInstruction("main", "load1");
+    const Value *load2 = findInstruction("main", "load2");
+    const Value *load3 = findInstruction("main", "load3");
 
     assertPtsToExact(load1, {F1});
+    assertPtsToExact(load2, {F2});
+    assertPtsToExact(load3, {F3});
 }
 
 TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Select") {
