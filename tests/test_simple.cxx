@@ -257,7 +257,6 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "Indirect_Call_From_Global_Function_Point
     assertPtsToContains(function, target);
 }
 
-
 TEST_CASE_FIXTURE(AndersenTestFixture, "Gen_NoErrorOnAbsentPtr") {
     parseAssembly(R"(
         define void @main() {
@@ -289,4 +288,71 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "Gen_NoErrorOnAbsentPtr") {
 
     PtsSetType ptsSet;
     andersen->getPointsToSet(nullptr, ptsSet, NoContext);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "General_Loop_Like") {
+    parseAssembly(R"(
+        define void @main() {
+        entry:
+            %container = alloca ptr
+            %a = alloca i32
+            %b = alloca i32
+            %c = alloca i32
+            br label %body
+
+        body:
+            store ptr %a, ptr %container
+            store ptr %b, ptr %container
+            store ptr %c, ptr %container
+            br label %exit
+
+        exit:
+            %load = load ptr, ptr %container
+            ret void
+        }
+    )");
+
+    const Value *a = findInstruction("main", "a");
+    const Value *b = findInstruction("main", "b");
+    const Value *c = findInstruction("main", "c");
+    const Value *load = findInstruction("main", "load");
+
+    assertPtsToSetSize(load, 3);
+    assertPtsToContains(load, a);
+    assertPtsToContains(load, b);
+    assertPtsToContains(load, c);
+}
+
+// TODO:
+TEST_CASE_FIXTURE(AndersenTestFixture, "General_IntToPtr_PtrToInt") {
+    parseAssembly(R"(
+        define void @main() {
+            %x = alloca i32
+            %i = ptrtoint ptr %x to i64
+            %y = inttoptr i64 %i to ptr
+            ret void
+        }
+    )");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+
+    assertPtsToExact(y, {x});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "General_IntToPtr_Opaque") {
+    // y = inttoptr then some i64 expr, this should theoretically go to set U..
+    parseAssembly(R"(
+        define void @main(i64 %raw) {
+            %x = add i64 %raw, 8
+            %y = inttoptr i64 %x to ptr
+            ret void
+        }
+    )");
+
+    const Value *y = findInstruction("main", "y");
+
+    // the main thing here is to ensure this doesnt crash.
+    PtsSetType pts;
+    andersen->getPointsToSet(y, pts, NoContext);
 }

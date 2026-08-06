@@ -674,3 +674,136 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "COS_AddFunction_FromEstablished") {
 
     assertPtsToExact(load, {first}, {x});
 }
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_memcpy") {
+    parseAssembly(R"(
+        %S = type { ptr, ptr }
+
+        define void @copy(ptr %src, ptr %dst) {
+            call void @llvm.memcpy.p0.p0.i64(ptr %dst, ptr %src, i64 16, i1 false)
+            ret void
+        }
+
+        define void @main() {
+            %srcA = alloca %S
+            %dstA = alloca %S
+            %x = alloca i32
+            %fieldAx = getelementptr inbounds %S, ptr %srcA, i32 0, i32 0
+            store ptr %x, ptr %fieldAx
+
+            %srcB = alloca %S
+            %dstB = alloca %S
+            %y = alloca i32
+            %fieldBy = getelementptr inbounds %S, ptr %srcB, i32 0, i32 0
+            store ptr %y, ptr %fieldBy
+
+            call void @copy(ptr %srcA, ptr %dstA)
+            call void @copy(ptr %srcB, ptr %dstB)
+
+            %loadA = getelementptr inbounds %S, ptr %dstA, i32 0, i32 0
+            %resA = load ptr, ptr %loadA
+
+            %loadB = getelementptr inbounds %S, ptr %dstB, i32 0, i32 0
+            %resB = load ptr, ptr %loadB
+            ret void
+        }
+
+        declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)
+    )");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+    const Value *resA = findInstruction("main", "resA");
+    const Value *resB = findInstruction("main", "resB");
+
+    assertPtsToContains(resA, x);
+    assertPtsToContains(resB, y);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_Mutual_Recursion_2F") {
+    parseAssembly(R"(
+        define void @check_even(i32 %n, ptr %out) {
+            %cmp = icmp eq i32 %n, 0
+            br i1 %cmp, label %base, label %rec
+
+        base:
+            ret void
+
+        rec:
+            %n1 = sub i32 %n, 1
+            call void @check_odd(i32 %n1, ptr %out)
+            ret void
+        }
+
+        define void @check_odd(i32 %n, ptr %out) {
+            %cmp = icmp eq i32 %n, 0
+            br i1 %cmp, label %base, label %rec
+
+        base:
+            %marker = alloca i32
+            store ptr %marker, ptr %out
+            ret void
+
+        rec:
+            %n1 = sub i32 %n, 1
+            call void @check_even(i32 %n1, ptr %out)
+            ret void
+        }
+
+        define void @main() {
+            %result = alloca ptr
+            call void @check_even(i32 4, ptr %result)
+            %load = load ptr, ptr %result
+            ret void
+        }
+    )");
+
+    const Value *load = findInstruction("main", "load");
+
+    // the main point of this one is to ensure that scanFunction's
+    // recursion doesn't go on forever.
+
+    PtsSetType pts;
+    andersen->getPointsToSet(load, pts, NoContext);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "COS_FS_memcpy") {
+    parseAssembly(R"(
+        %S = type { ptr, ptr }
+
+        define void @F1(ptr %out, ptr %val) {
+            %tmp = alloca %S
+            %f0 = getelementptr inbounds %S, ptr %tmp, i32 0, i32 0
+            store ptr %val, ptr %f0
+            call void @llvm.memcpy.p0.p0.i64(ptr %out, ptr %tmp, i64 16, i1 false)
+            ret void
+        }
+
+        define void @main() {
+            %ptrA = alloca %S
+            %a = alloca i32
+            call void @F1(ptr %ptrA, ptr %a)
+
+            %ptrB = alloca %S
+            %b = alloca i32
+            call void @F1(ptr %ptrB, ptr %b)
+
+            %fieldA = getelementptr inbounds %S, ptr %ptrA, i32 0, i32 0
+            %loadA = load ptr, ptr %fieldA
+
+            %fieldB = getelementptr inbounds %S, ptr %ptrB, i32 0, i32 0
+            %loadB = load ptr, ptr %fieldB
+            ret void
+        }
+
+        declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)
+    )");
+
+    const Value *a = findInstruction("main", "a");
+    const Value *b = findInstruction("main", "b");
+    const Value *loadA = findInstruction("main", "loadA");
+    const Value *loadB = findInstruction("main", "loadB");
+
+    assertPtsToContains(loadA, a);
+    assertPtsToContains(loadB, b);
+}

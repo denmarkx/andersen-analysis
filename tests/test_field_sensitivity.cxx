@@ -1024,3 +1024,443 @@ TEST_CASE_FIXTURE(AndersenTestFixture, "FS_MEMCPY_On_Field_From_Parameter") {
     const Value *loadA = findInstruction("Create", "loadA");
     assertPtsToExact(loadA, {data}, {container});
 }
+
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Linked_List") {
+    parseAssembly(R"(
+        %Node = type { i32, ptr }
+
+        define void @main() {
+            %n1 = alloca %Node
+            %n2 = alloca %Node
+
+            %n1_next = getelementptr inbounds %Node, ptr %n1, i32 0, i32 1
+            store ptr %n2, ptr %n1_next
+
+            %n2_next = getelementptr inbounds %Node, ptr %n2, i32 0, i32 1
+
+            %load_n1_next = load ptr, ptr %n1_next
+            %load_n2_next = load ptr, ptr %n2_next
+            ret void
+        }
+    )");
+
+    const Value *n2 = findInstruction("main", "n2");
+    const Value *load_n1_next = findInstruction("main", "load_n1_next");
+    const Value *load_n2_next = findInstruction("main", "load_n2_next");
+
+    assertPtsToExact(load_n1_next, {n2});
+    assertPtsToSetEmpty(load_n2_next);
+}
+
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Linked_List_Cycle") {
+    parseAssembly(R"(
+        %Node = type { i32, ptr }
+
+        define void @main() {
+            %n1 = alloca %Node
+            %n2 = alloca %Node
+
+            %n1_next = getelementptr inbounds %Node, ptr %n1, i32 0, i32 1
+            store ptr %n2, ptr %n1_next
+
+            %n2_next = getelementptr inbounds %Node, ptr %n2, i32 0, i32 1
+            store ptr %n1, ptr %n2_next
+
+            %load1 = load ptr, ptr %n1_next  ; n2
+            %load2 = load ptr, ptr %n2_next  ; n1
+
+            %hop1 = load ptr, ptr %n1_next
+            %hop1_next = getelementptr inbounds %Node, ptr %hop1, i32 0, i32 1
+            %hop2 = load ptr, ptr %hop1_next
+            ret void
+        }
+    )");
+
+    const Value *n1 = findInstruction("main", "n1");
+    const Value *n2 = findInstruction("main", "n2");
+    const Value *load1 = findInstruction("main", "load1");
+    const Value *load2 = findInstruction("main", "load2");
+    const Value *hop2 = findInstruction("main", "hop2");
+
+    assertPtsToExact(load1, {n2});
+    assertPtsToExact(load2, {n1});
+    assertPtsToExact(hop2, {n1});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Binary_Tree_Node") {
+    parseAssembly(R"(
+        %Node = type { ptr, ptr, i32 }
+
+        define void @main() {
+            %root = alloca %Node
+            %leftChild = alloca %Node
+            %rightChild = alloca %Node
+
+            %rootLeft = getelementptr inbounds %Node, ptr %root, i32 0, i32 0
+            store ptr %leftChild, ptr %rootLeft
+
+            %rootRight = getelementptr inbounds %Node, ptr %root, i32 0, i32 1
+            store ptr %rightChild, ptr %rootRight
+
+            %loadLeft = load ptr, ptr %rootLeft
+            %loadRight = load ptr, ptr %rootRight
+            ret void
+        }
+    )");
+
+    const Value *leftChild = findInstruction("main", "leftChild");
+    const Value *rightChild = findInstruction("main", "rightChild");
+    const Value *loadLeft = findInstruction("main", "loadLeft");
+    const Value *loadRight = findInstruction("main", "loadRight");
+
+    assertPtsToExact(loadLeft, {leftChild});
+    assertPtsToExact(loadRight, {rightChild});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_StoreSameField") {
+    parseAssembly(R"(
+        %S = type { ptr }
+
+        define void @main() {
+            %s = alloca %S
+            %x = alloca i32
+            %y = alloca i32
+
+            %field = getelementptr inbounds %S, ptr %s, i32 0, i32 0
+            store ptr %x, ptr %field
+            store ptr %y, ptr %field
+
+            %load = load ptr, ptr %field
+            ret void
+        }
+    )");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+    const Value *load = findInstruction("main", "load");
+
+    assertPtsToSetSize(load, 2);
+    assertPtsToContains(load, x);
+    assertPtsToContains(load, y);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_AoS") {
+    parseAssembly(R"(
+        %S = type { ptr, ptr }
+
+        define void @main() {
+            %arr = alloca [4 x %S]
+
+            %x = alloca i32
+            %y = alloca i32
+
+            %e1f0 = getelementptr inbounds [4 x %S], ptr %arr, i32 0, i32 1, i32 0
+            store ptr %x, ptr %e1f0
+
+            %e2f1 = getelementptr inbounds [4 x %S], ptr %arr, i32 0, i32 2, i32 1
+            store ptr %y, ptr %e2f1
+
+            %load1 = load ptr, ptr %e1f0
+            %load2 = load ptr, ptr %e2f1
+
+            %e1f1 = getelementptr inbounds [4 x %S], ptr %arr, i32 0, i32 1, i32 1
+            %load3 = load ptr, ptr %e1f1
+            ret void
+        }
+    )");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+    const Value *load1 = findInstruction("main", "load1");
+    const Value *load2 = findInstruction("main", "load2");
+    const Value *load3 = findInstruction("main", "load3");
+
+    assertPtsToExact(load1, {x});
+    assertPtsToExact(load2, {y});
+    assertPtsToSetEmpty(load3);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_SoA") {
+    parseAssembly(R"(
+        %S = type { [2 x ptr], i32 }
+
+        define void @main() {
+            %s = alloca %S
+            %x = alloca i32
+            %y = alloca i32
+
+            %f0 = getelementptr inbounds %S, ptr %s, i32 0, i32 0, i32 0
+            store ptr %x, ptr %f0
+
+            %f1 = getelementptr inbounds %S, ptr %s, i32 0, i32 0, i32 1
+            store ptr %y, ptr %f1
+
+            %load0 = load ptr, ptr %f0
+            %load1 = load ptr, ptr %f1
+            ret void
+        }
+    )");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+    const Value *load0 = findInstruction("main", "load0");
+    const Value *load1 = findInstruction("main", "load1");
+
+    assertPtsToExact(load0, {x});
+    assertPtsToExact(load1, {y});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_FunctionPointer_Struct") {
+    parseAssembly(R"(
+        %vtable = type { ptr, ptr }
+
+        define void @new() { ret void }
+        define void @drop() { ret void }
+
+        define void @main() {
+            %vt = alloca %vtable
+
+            %fieldA = getelementptr inbounds %vtable, ptr %vt, i32 0, i32 0
+            store ptr @new, ptr %fieldA
+
+            %fieldB = getelementptr inbounds %vtable, ptr %vt, i32 0, i32 1
+            store ptr @drop, ptr %fieldB
+
+            %fn = load ptr, ptr %fieldA
+            call void %fn()
+            ret void
+        }
+    )");
+
+    const Function *newFunc = findFunction("new");
+    const Function *dropFunc = findFunction("drop");
+    const Value *fn = findInstruction("main", "fn");
+
+    assertPtsToExact(fn, {newFunc});
+    assertPtsToSetSize(dropFunc, 1);
+}
+
+// TODO:
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_FunctionPointer_Array") {
+    parseAssembly(R"(
+        define void @F1() { ret void }
+        define void @F2() { ret void }
+        define void @F3() { ret void }
+
+        define void @main() {
+            %ptr = alloca [3 x ptr]
+
+            %s0 = getelementptr inbounds [3 x ptr], ptr %ptr, i32 0, i32 0
+            store ptr @F1, ptr %s0
+
+            %s1 = getelementptr inbounds [3 x ptr], ptr %ptr, i32 0, i32 1
+            store ptr @F2, ptr %s1
+
+            %s2 = getelementptr inbounds [3 x ptr], ptr %ptr, i32 0, i32 2
+            store ptr @F3, ptr %s2
+
+            %load1 = load ptr, ptr %s1
+            ret void
+        }
+    )");
+
+    const Value *F1 = findFunction("F1");
+    const Value *load1 = findInstruction("main", "load1");
+
+    assertPtsToExact(load1, {F1});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Select") {
+    parseAssembly(R"(
+        %S = type { ptr, ptr }
+
+        define void @main(i1 %cond) {
+            %s = alloca %S
+            %x = alloca i32
+            %y = alloca i32
+
+            %f0 = getelementptr inbounds %S, ptr %s, i32 0, i32 0
+            store ptr %x, ptr %f0
+
+            %f1 = getelementptr inbounds %S, ptr %s, i32 0, i32 1
+            store ptr %y, ptr %f1
+
+            %choice = select i1 %cond, ptr %f0, ptr %f1
+            %load = load ptr, ptr %choice
+            ret void
+        }
+    )");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+    const Value *load = findInstruction("main", "load");
+
+    assertPtsToSetSize(load, 2);
+    assertPtsToContains(load, x);
+    assertPtsToContains(load, y);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Store_Then_Memcpy") {
+    parseAssembly(R"(
+        %S = type { ptr }
+
+        define void @main() {
+            %src = alloca %S
+            %dst = alloca %S
+
+            %x = alloca i32
+            %y = alloca i32
+
+            %srcField = getelementptr inbounds %S, ptr %src, i32 0, i32 0
+            store ptr %x, ptr %srcField
+            store ptr %y, ptr %srcField
+
+            call void @llvm.memcpy.p0.p0.i64(ptr %dst, ptr %src, i64 8, i1 false)
+
+            %dstField = getelementptr inbounds %S, ptr %dst, i32 0, i32 0
+            %load = load ptr, ptr %dstField
+            ret void
+        }
+
+        declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)
+    )");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+    const Value *load = findInstruction("main", "load");
+
+    assertPtsToSetSize(load, 2);
+    assertPtsToContains(load, x);
+    assertPtsToContains(load, y);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Global_Struct_Init_Global") {
+    parseAssembly(R"(
+        %Node = type { i32, ptr }
+
+        @n2 = global %Node { i32 2, ptr null }
+        @n1 = global %Node { i32 1, ptr @n2 }
+
+        define void @main() {
+            %field = getelementptr inbounds %Node, ptr @n1, i32 0, i32 1
+            %load = load ptr, ptr %field
+            ret void
+        }
+    )");
+
+    const Value *n2 = findGlobal("n2");
+    const Value *load = findInstruction("main", "load");
+
+    assertPtsToExact(load, {n2});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_Global_Struct_Mixed_Ptrs_and_Ints") {
+    parseAssembly(R"(
+        %S = type { i32, ptr, i64, ptr }
+
+        define void @F1() { ret void }
+
+        @g = global %S { i32 42, ptr @F1, i64 100, ptr null }
+
+        define void @main() {
+            %handlerField = getelementptr inbounds %S, ptr @g, i32 0, i32 1
+            %load = load ptr, ptr %handlerField
+
+            %nullField = getelementptr inbounds %S, ptr @g, i32 0, i32 3
+            %load2 = load ptr, ptr %nullField
+            ret void
+        }
+    )");
+
+    const Value *F1 = findFunction("F1");
+    const Value *load = findInstruction("main", "load");
+    const Value *load2 = findInstruction("main", "load2");
+
+    assertPtsToExact(load, {F1});
+    assertPtsToSetEmpty(load2);
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_GEP_NonConstantIdx") {
+    parseAssembly(R"(
+        %S = type [ 3 x ptr ]
+
+        define void @main(i32 %idxA, i32 %idxB) {
+            %s = alloca %S
+
+            %x = alloca i32
+            %y = alloca i32
+
+            %s1 = getelementptr inbounds %S, ptr %s, i32 0, i32 0
+            store ptr %x, ptr %s1
+
+            %s2 = getelementptr inbounds %S, ptr %s, i32 0, i32 0
+            store ptr %y, ptr %s2
+
+            %dynB = getelementptr inbounds %S, ptr %s, i32 0, i32 %idxA
+            %loadA = load ptr, ptr %dynA
+
+            %dynA = getelementptr inbounds %S, ptr %s, i32 0, i32 %idxB
+            %loadB = load ptr, ptr %dynB
+            ret void
+        }
+    )");
+
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+    const Value *loadA = findInstruction("main", "loadA");
+    const Value *loadB = findInstruction("main", "loadB");
+
+    // since we have no idea what %idxA/B are, we assume loadA
+    // and loadB can point to anything inside s.
+    assertPtsToExact(loadA, {x, y});
+    assertPtsToExact(loadB, {x, y});
+}
+
+TEST_CASE_FIXTURE(AndersenTestFixture, "FS_GEP_NonConstantIdx_Interprocedural") {
+    parseAssembly(R"(
+        %S = type [ 3 x ptr ]
+
+        define void @loadField(ptr %ptr, i32 %idx) {
+            %dyn = getelementptr inbounds %S, ptr %ptr, i32 0, i32 %idx
+            %load = load ptr, ptr %dyn
+            ret void
+        }
+
+        define void @loadFieldFromGEP(ptr %gep) {
+            %load = load ptr, ptr %gep
+            ret void
+        }
+
+        define void @main(i32 %idxA, i32 %idxB) {
+            %s = alloca %S
+
+            %x = alloca i32
+            %y = alloca i32
+
+            %s1 = getelementptr inbounds %S, ptr %s, i32 0, i32 0
+            store ptr %x, ptr %s1
+
+            %s2 = getelementptr inbounds %S, ptr %s, i32 0, i32 0
+            store ptr %y, ptr %s2
+
+            call void @loadField(ptr %s, i32 %idxA)
+
+            %gep = getelementptr inbounds %S, ptr %s, i32 0, i32 %idxA
+            call void @loadFieldFromGEP(ptr %gep)
+            ret void
+        }
+    )");
+
+    const Value *s = findInstruction("main", "s");
+    const Value *gep = findInstruction("main", "gep");
+    const Value *x = findInstruction("main", "x");
+    const Value *y = findInstruction("main", "y");
+            
+    const Value *load = findInstruction("loadField", "load");
+    const Value *loadFromGEP = findInstruction("loadFieldFromGEP", "load");
+
+    assertPtsToExact(load, {x, y}, {s});
+    assertPtsToExact(loadFromGEP, {x, y}, {gep});
+}
